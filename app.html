@@ -116,6 +116,7 @@
         }
 
         .tool-button.active { background: black; color: white; }
+        .tool-button.sticky { outline: 2px solid #0055ff; outline-offset: 1px; }
 
         .tool-divider {
             width: 48px;
@@ -150,6 +151,45 @@
         }
         .stroke-swatch.active { outline: 2px solid #0055ff; outline-offset: 1px; }
         #strokeGrid { display: flex; flex-direction: column; gap: 3px; }
+
+        /* ── Text input overlay ── */
+        #textInput {
+            position: absolute;
+            display: none;
+            outline: 1px dashed #0055ff;
+            background: transparent;
+            color: black;
+            min-width: 20px;
+            min-height: 1em;
+            padding: 0;
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+            overflow: visible;
+            z-index: 10;
+            cursor: text;
+        }
+
+        /* ── Submenus ── */
+        .menu-row { position: relative; }
+        .menu-check { position: absolute; left: 4px; visibility: hidden; }
+        .menu-row.checked .menu-check { visibility: visible; }
+        .menu-has-sub > span.menu-arr { font-size: 9px; margin-left: auto; padding-left: 12px; }
+        .menu-sub {
+            display: none;
+            position: absolute;
+            left: calc(100% + 1px);
+            top: -4px;
+            background: white;
+            border: 1px solid black;
+            box-shadow: 2px 2px 0 rgba(0,0,0,0.35);
+            min-width: 160px;
+            z-index: 1001;
+            padding: 3px 0;
+        }
+        .menu-has-sub:hover > .menu-sub { display: block; }
+        .menu-has-sub:hover { background: black; color: white; }
+        .menu-sub { color: black; }
 
         /* ── Editor layout ── */
         .editor-area {
@@ -237,6 +277,7 @@
         <button class="tool-button"        data-tool="ellipse"   title="Ellips (E)">◯</button>
         <button class="tool-button"        data-tool="line"      title="Linje (L)">／</button>
         <button class="tool-button"        data-tool="bezier"    title="Bézier (B)">✒</button>
+        <button class="tool-button"        data-tool="text"      title="Text (T)">A</button>
         <hr class="tool-divider" />
         <div class="pattern-grid" id="patternGrid"></div>
         <hr class="tool-divider" />
@@ -250,6 +291,7 @@
             <canvas id="rulerV" width="20"   height="900"></canvas>
             <div class="document">
                 <canvas id="drawingCanvas" width="1200" height="900"></canvas>
+                <div id="textInput" contenteditable="true" spellcheck="false"></div>
             </div>
         </div>
     </main>

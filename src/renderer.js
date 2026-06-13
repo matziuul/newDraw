@@ -16,6 +16,7 @@ export class Renderer {
         if (state.showGrid) this._drawGrid();
 
         for (const shape of state.shapes) {
+            if (shape.id === state.editingTextId) continue; // overlay handles rendering while editing
             shape.draw(ctx, patterns, state.quickDraw);
             if (shape.id === state.selectedId) this._drawSelection(shape);
         }
@@ -154,8 +155,8 @@ export class Renderer {
         ctx.strokeRect(b.x - pad + 0.5, b.y - pad + 0.5, b.width + pad*2, b.height + pad*2);
         ctx.setLineDash([]);
 
-        // Groups: just the dashed outline, no resize handles
-        if (shape.type === 'group') { ctx.restore(); return; }
+        // Groups and text: just the dashed outline, no resize handles
+        if (shape.type === 'group' || shape.type === 'text') { ctx.restore(); return; }
 
         const locked = shape.locked;
         for (const h of getHandlePoints(b)) {

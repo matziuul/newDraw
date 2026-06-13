@@ -17,6 +17,13 @@ export class AppState {
         this.selectedIds = [];   // multi-selection (non-empty only when >1 shapes selected)
         this.rubberBand  = null; // { x, y, w, h } while rubber-band drag is active
 
+        this.toolSticky      = false; // true when tool was double-clicked (stays active)
+
+        this.activeFont      = 'Geneva';
+        this.activeFontSize  = 12;
+        this.activeFontStyle = 0;
+        this.editingTextId   = null; // id of TextShape currently open in overlay
+
         this.activeStrokeWidth = 2;
 
         this.showGrid = false;

@@ -1,4 +1,5 @@
 import { nextUid, offsetShape, GroupShape } from './shapes.js';
+import { FONTS, FONT_SIZES, STYLE_DEFS } from './text-defs.js';
 import { printDrawing } from './print.js';
 
 const MENUS = [
@@ -31,6 +32,12 @@ const MENUS = [
         '-',
         { label: 'Lock',   kbd: '⌘L',        action: 'lock',   needs: 'sel' },
         { label: 'Unlock', kbd: '⇧⌘L',  action: 'unlock', needs: 'sel' },
+    ]},
+    { id: 'text', label: 'Text', items: [
+        { label: 'Font', sub: FONTS.map(f => ({ label: f.name, action: `font:${f.name}` })) },
+        { label: 'Size', sub: FONT_SIZES.map(s => ({ label: String(s), action: `size:${s}` })) },
+        '-',
+        ...STYLE_DEFS.map(s => ({ label: s.name, kbd: s.kbd ?? null, action: `textStyle:${s.id}` })),
     ]},
 ];
 
@@ -72,11 +79,57 @@ export class MenuSystem {
                     const sep = document.createElement('hr');
                     sep.className = 'menu-sep';
                     drop.appendChild(sep);
+                } else if (item.sub) {
+                    // Sub-menu row
+                    const row = document.createElement('div');
+                    row.className = 'menu-row menu-has-sub';
+                    if (item.needs) row.dataset.needs = item.needs;
+
+                    const chk = document.createElement('span');
+                    chk.className = 'menu-check'; chk.textContent = '✓';
+                    row.appendChild(chk);
+
+                    const lbl = document.createElement('span');
+                    lbl.textContent = item.label;
+                    row.appendChild(lbl);
+
+                    const arr = document.createElement('span');
+                    arr.className = 'menu-arr'; arr.textContent = '▶';
+                    row.appendChild(arr);
+
+                    const sub = document.createElement('div');
+                    sub.className = 'menu-sub';
+                    for (const si of item.sub) {
+                        const sRow = document.createElement('div');
+                        sRow.className = 'menu-row';
+                        sRow.dataset.action = si.action;
+
+                        const sChk = document.createElement('span');
+                        sChk.className = 'menu-check'; sChk.textContent = '✓';
+                        sRow.appendChild(sChk);
+
+                        const sLbl = document.createElement('span');
+                        sLbl.textContent = si.label;
+                        sRow.appendChild(sLbl);
+
+                        sRow.addEventListener('mousedown', e => {
+                            e.preventDefault();
+                            this._closeAll();
+                            this._execute(si.action);
+                        });
+                        sub.appendChild(sRow);
+                    }
+                    row.appendChild(sub);
+                    drop.appendChild(row);
                 } else {
                     const row = document.createElement('div');
                     row.className = 'menu-row';
                     row.dataset.action = item.action;
                     if (item.needs) row.dataset.needs = item.needs;
+
+                    const chk = document.createElement('span');
+                    chk.className = 'menu-check'; chk.textContent = '✓';
+                    row.appendChild(chk);
 
                     const lbl = document.createElement('span');
                     lbl.textContent = item.label;
@@ -113,12 +166,10 @@ export class MenuSystem {
         }
 
         // Static non-interactive titles
-        for (const lbl of ['Draw', 'Text']) {
-            const span = document.createElement('span');
-            span.className = 'menu-head menu-head-dimmed';
-            span.textContent = lbl;
-            bar.appendChild(span);
-        }
+        const drawSpan = document.createElement('span');
+        drawSpan.className = 'menu-head menu-head-dimmed';
+        drawSpan.textContent = 'Draw';
+        bar.appendChild(drawSpan);
     }
 
     // ── Dropdown open / close ─────────────────────────────────────────────────
@@ -151,6 +202,26 @@ export class MenuSystem {
                 (n === 'group' && !hasGroup)
             );
         });
+
+        // Update text-menu checkmarks (font, size, style)
+        const af = this.state.activeFont;
+        const as = this.state.activeFontSize;
+        const ast = this.state.activeFontStyle;
+
+        const setCheck = (row, checked) => {
+            row.classList.toggle('checked', checked);
+            const chk = row.querySelector(':scope > .menu-check');
+            if (chk) chk.style.visibility = checked ? 'visible' : 'hidden';
+        };
+
+        drop.querySelectorAll('.menu-row[data-action^="font:"]').forEach(r =>
+            setCheck(r, r.dataset.action.slice(5) === af));
+        drop.querySelectorAll('.menu-row[data-action^="size:"]').forEach(r =>
+            setCheck(r, parseInt(r.dataset.action.slice(5)) === as));
+        drop.querySelectorAll('.menu-row[data-action^="textStyle:"]').forEach(r => {
+            const bit = parseInt(r.dataset.action.slice(10));
+            setCheck(r, bit === 0 ? (ast === 0) : !!(ast & bit));
+        });
     }
 
     // ── Global event listeners ────────────────────────────────────────────────
@@ -160,8 +231,11 @@ export class MenuSystem {
             if (!e.target.closest('.menu-wrap')) this._closeAll();
         });
 
-        // Shortcuts not handled by ToolController: File and Arrange
+        // Shortcuts not handled by ToolController: File, Arrange, Text
         document.addEventListener('keydown', e => {
+            // Don't intercept when text overlay is focused
+            if (document.activeElement?.id === 'textInput') return;
+
             const cmd = e.metaKey || e.ctrlKey;
             if (!cmd) return;
 
@@ -191,6 +265,18 @@ export class MenuSystem {
             }
             if (e.key === 'l' && e.shiftKey) {
                 e.preventDefault(); this._execute('unlock'); return;
+            }
+            if (e.key === 't' && !e.shiftKey) {
+                e.preventDefault(); this._execute('textStyle:0'); return;
+            }
+            if (e.key === 'b' && !e.shiftKey) {
+                e.preventDefault(); this._execute('textStyle:1'); return;
+            }
+            if (e.key === 'i' && !e.shiftKey) {
+                e.preventDefault(); this._execute('textStyle:2'); return;
+            }
+            if (e.key === 'u' && !e.shiftKey) {
+                e.preventDefault(); this._execute('textStyle:4'); return;
             }
         });
     }
@@ -252,6 +338,43 @@ export class MenuSystem {
                     this.tc.syncUI();
                 }
                 return;
+
+            // Text — font
+            default: {
+                if (action.startsWith('font:')) {
+                    const name = action.slice(5);
+                    state.activeFont = name;
+                    if (sel?.type === 'text') {
+                        const snap = history.savePreOp();
+                        sel.fontFamily = name; history.commit(snap); renderer.render();
+                    }
+                    this.tc.syncOverlayStyle();
+                    return;
+                }
+                if (action.startsWith('size:')) {
+                    const sz = parseInt(action.slice(5));
+                    state.activeFontSize = sz;
+                    if (sel?.type === 'text') {
+                        const snap = history.savePreOp();
+                        sel.fontSize = sz; history.commit(snap); renderer.render();
+                    }
+                    this.tc.syncOverlayStyle();
+                    return;
+                }
+                if (action.startsWith('textStyle:')) {
+                    const bit = parseInt(action.slice(10));
+                    const current = sel?.type === 'text' ? sel.fontStyle : state.activeFontStyle;
+                    const next = bit === 0 ? 0 : (current ^ bit);
+                    state.activeFontStyle = next;
+                    if (sel?.type === 'text') {
+                        const snap = history.savePreOp();
+                        sel.fontStyle = next; history.commit(snap); renderer.render();
+                    }
+                    this.tc.syncOverlayStyle();
+                    return;
+                }
+                return;
+            }
 
             // Arrange — group / ungroup
             case 'group': {
@@ -383,6 +506,10 @@ function _applyFn(shape, fn) {
     } else if (shape.type === 'group') {
         // All children transform around the group's center (fn already has cx/cy baked in)
         for (const child of shape.children) _applyFn(child, fn);
+
+    } else if (shape.type === 'text') {
+        const p = fn(shape.x, shape.y);
+        shape.x = p.x; shape.y = p.y;
 
     } else {
         // rect / ellipse: transform corners → new axis-aligned bounding box

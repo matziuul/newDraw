@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { QD_PATTERNS } from '../src/patterns.js';
 
 describe('QD_PATTERNS', () => {
-    it('has 8 entries', () => {
-        expect(QD_PATTERNS).toHaveLength(8);
+    it(`has ${37} entries`, () => {
+        expect(QD_PATTERNS).toHaveLength(37);
     });
 
     it('first entry (ingen) has null rows', () => {

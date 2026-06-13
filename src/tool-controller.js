@@ -1,18 +1,20 @@
 import {
     hitTestHandle, hitTestBezierHandle, HANDLE_DEFS,
-    RectangleShape, EllipseShape, LineShape, BezierShape,
+    RectangleShape, EllipseShape, LineShape, BezierShape, TextShape,
     nextUid, offsetShape, applyMoveFromOrigin,
 } from './shapes.js';
+import { fontCss } from './text-defs.js';
 import { printDrawing } from './print.js';
 
 export class ToolController {
-    constructor(state, renderer, history, ruler, canvas, toolbar) {
+    constructor(state, renderer, history, ruler, canvas, toolbar, textInput) {
         this.state = state;
         this.renderer = renderer;
         this.history = history;
         this.ruler = ruler;
         this.canvas = canvas;
         this.toolbar = toolbar;
+        this.textInput = textInput ?? null;
 
         this.isDragging = false;
         this.dragMode = 'none';
@@ -24,6 +26,9 @@ export class ToolController {
         this.hasMoved = false;
         this.bezierDragging = false;
 
+        this.editingTextShape = null; // TextShape being edited, or null for new
+        this.editingTextPos   = null; // { x, y } for new text placement
+
         this.elPos  = document.getElementById('statusPos');
         this.elSize = document.getElementById('statusSize');
 
@@ -34,13 +39,23 @@ export class ToolController {
         this.canvas.addEventListener('mousedown',  e => this._onDown(e));
         this.canvas.addEventListener('mousemove',  e => this._onMove(e));
         this.canvas.addEventListener('mouseup',    e => this._onUp(e));
-        this.canvas.addEventListener('dblclick',   e => this._onBezierDblClick(e));
+        this.canvas.addEventListener('dblclick',   e => this._onDblClick(e));
         this.canvas.addEventListener('mouseleave', e => {
             this.ruler.setMouse(-1, -1); this.ruler.render();
             if (this.bezierDragging) { this.bezierDragging = false; return; }
             this._onUp(e);
         });
         document.addEventListener('keydown', e => this._onKey(e));
+
+        if (this.textInput) {
+            this.textInput.addEventListener('blur', () => this._commitText());
+            this.textInput.addEventListener('keydown', e => {
+                if (e.key === 'Escape') { e.preventDefault(); this._cancelText(); return; }
+                // Prevent browser from applying contenteditable formatting
+                if ((e.metaKey || e.ctrlKey) && ['b', 'i', 'u', 't'].includes(e.key.toLowerCase()))
+                    e.preventDefault();
+            });
+        }
     }
 
     _pos(e) {
@@ -53,13 +68,33 @@ export class ToolController {
 
     syncUI() { this._update(); }
 
+    syncOverlayStyle() {
+        const el = this.textInput;
+        if (!el || el.style.display === 'none') return;
+        const shape = this.editingTextShape;
+        const fontFamily = shape ? fontCss(shape.fontFamily) : fontCss(this.state.activeFont);
+        const fontSize   = shape ? shape.fontSize   : this.state.activeFontSize;
+        const fontStyle  = shape ? shape.fontStyle  : this.state.activeFontStyle;
+        el.style.fontFamily     = fontFamily;
+        el.style.fontSize       = fontSize + 'px';
+        el.style.fontWeight     = (fontStyle & 1) ? 'bold'   : 'normal';
+        el.style.fontStyle      = (fontStyle & 2) ? 'italic' : 'normal';
+        el.style.textDecoration = (fontStyle & 4) ? 'underline' : 'none';
+        el.style.lineHeight     = Math.ceil(fontSize * 1.25) + 'px';
+    }
+
     _update() {
         const sel = this.state.selectedShape;
         const multi = this.state.selectedIds.length > 1;
         if (sel) {
-            if (sel.type !== 'group') {
+            if (sel.type !== 'group' && sel.type !== 'text') {
                 this.state.activePatternIdx  = sel.fillIdx;
                 this.state.activeStrokeWidth = sel.strokeWidth;
+            }
+            if (sel.type === 'text') {
+                this.state.activeFont      = sel.fontFamily;
+                this.state.activeFontSize  = sel.fontSize;
+                this.state.activeFontStyle = sel.fontStyle;
             }
             const b = sel.getBounds();
             this.elSize.textContent = `${this._fmt(b.width)} × ${this._fmt(b.height)}${this._fmtUnit()}`;
@@ -92,6 +127,12 @@ export class ToolController {
     _fmtUnit() { return this.state.rulerUnit === 'mm' ? ' mm' : ''; }
 
     _onKey(e) {
+        // Don't intercept keys while text overlay is focused
+        if (this.textInput && document.activeElement === this.textInput) {
+            if (e.key === 'Escape') { e.preventDefault(); this._cancelText(); }
+            return;
+        }
+
         const cmd = e.metaKey || e.ctrlKey;
 
         if (cmd && e.key === 'z' && !e.shiftKey) {
@@ -197,6 +238,13 @@ export class ToolController {
 
     _onDown(e) {
         const raw = this._pos(e);
+        if (this.state.activeTool === 'text') {
+            // Prevent the browser from moving focus to the document after this click.
+            // Without this, clicking the canvas blurs the textInput before focus settles.
+            e.preventDefault();
+            this._textDown(raw);
+            return;
+        }
         if (this.state.activeTool === 'select') this._selectDown(raw);
         else if (this.state.activeTool === 'bezier') this._bezierDown(this._snapPos(raw));
         else this._drawDown(this._snapPos(raw), this.state.activeTool);
@@ -221,8 +269,8 @@ export class ToolController {
             }
         }
 
-        // Resize handle (single selected non-bezier, non-group, unlocked)
-        if (sel && sel.type !== 'bezier' && sel.type !== 'group' && !sel.locked) {
+        // Resize handle (single selected non-bezier, non-group, non-text, unlocked)
+        if (sel && sel.type !== 'bezier' && sel.type !== 'group' && sel.type !== 'text' && !sel.locked) {
             const hid = hitTestHandle(pos.x, pos.y, sel.getBounds());
             if (hid) {
                 this.preOpSnapshot = this.history.savePreOp();
@@ -445,6 +493,7 @@ export class ToolController {
     }
 
     _updateCursor(pos) {
+        if (this.state.activeTool === 'text') { this.canvas.style.cursor = 'text'; return; }
         if (this.state.activeTool !== 'select') { this.canvas.style.cursor = 'crosshair'; return; }
         const state = this.state;
         const sel = state.selectedShape;
@@ -458,7 +507,7 @@ export class ToolController {
                     this.canvas.style.cursor = bh.role === 'anchor' ? 'move' : 'crosshair';
                     return;
                 }
-            } else if (sel.type !== 'bezier' && sel.type !== 'group' && !sel.locked) {
+            } else if (sel.type !== 'bezier' && sel.type !== 'group' && sel.type !== 'text' && !sel.locked) {
                 const hid = hitTestHandle(pos.x, pos.y, sel.getBounds());
                 if (hid) { this.canvas.style.cursor = HANDLE_DEFS.find(d => d.id === hid)?.cursor ?? 'default'; return; }
             }
@@ -501,6 +550,7 @@ export class ToolController {
                     this.state.shapes.push(shape);
                     this.state.selectedId = shape.id;
                     this.history.commit(this.preOpSnapshot);
+                    if (!this.state.toolSticky) this.toolbar?.resetToSelect();
                 }
             }
             this.state.currentDraft = null;
@@ -576,6 +626,7 @@ export class ToolController {
             this.state.shapes.push(shape);
             this.state.selectedId = shape.id;
             this.history.commit(this.preOpSnapshot);
+            if (!this.state.toolSticky) this.toolbar?.resetToSelect();
         }
         this.state.currentDraft = null;
         this.bezierDragging = false;
@@ -583,12 +634,115 @@ export class ToolController {
         this._update();
     }
 
-    _onBezierDblClick(e) {
+    _onDblClick(e) {
+        // Text shape double-click with select tool → enter edit mode
+        if (this.state.activeTool === 'select') {
+            const raw = this._pos(e);
+            const sel = this.state.selectedShape;
+            if (sel?.type === 'text' && sel.hitTest(raw.x, raw.y)) {
+                e.preventDefault();
+                this._showTextOverlay(sel.x, sel.y, sel);
+                this.renderer.render();
+                return;
+            }
+        }
+        // Bezier: finish drawing on double-click
         const d = this.state.currentDraft;
         if (!d || d.type !== 'bezier') return;
         e.preventDefault();
         // The second mousedown of the dblclick already added a duplicate point — remove it
         if (d.points.length > 1) d.points.pop();
         this._finishBezier();
+    }
+
+    _textDown(pos) {
+        this._commitText(); // commit any existing edit first
+        // Check for an existing text shape at this position
+        let hit = null;
+        for (let i = this.state.shapes.length - 1; i >= 0; i--) {
+            const s = this.state.shapes[i];
+            if (s.type === 'text' && s.hitTest(pos.x, pos.y)) { hit = s; break; }
+        }
+        if (hit) {
+            this.state.selectedId  = hit.id;
+            this.state.selectedIds = [];
+            this._showTextOverlay(hit.x, hit.y, hit);
+        } else {
+            this.state.selectedId  = null;
+            this.state.selectedIds = [];
+            this._showTextOverlay(pos.x, pos.y, null);
+        }
+        this.renderer.render();
+    }
+
+    _showTextOverlay(x, y, shape) {
+        const el = this.textInput;
+        if (!el) return;
+        const fontFamily = shape ? fontCss(shape.fontFamily) : fontCss(this.state.activeFont);
+        const fontSize   = shape ? shape.fontSize   : this.state.activeFontSize;
+        const fontStyle  = shape ? shape.fontStyle  : this.state.activeFontStyle;
+        el.style.left        = x + 'px';
+        el.style.top         = y + 'px';
+        el.style.fontFamily  = fontFamily;
+        el.style.fontSize    = fontSize + 'px';
+        el.style.fontWeight  = (fontStyle & 1) ? 'bold'   : 'normal';
+        el.style.fontStyle   = (fontStyle & 2) ? 'italic' : 'normal';
+        el.style.textDecoration = (fontStyle & 4) ? 'underline' : 'none';
+        el.style.lineHeight  = Math.ceil(fontSize * 1.25) + 'px';
+        el.innerText         = shape ? shape.text : '';
+        el.style.display     = 'block';
+        this.editingTextShape = shape;
+        this.editingTextPos   = { x, y };
+        this.state.editingTextId = shape?.id ?? null;
+        // Defer focus: calling focus() inside a mousedown handler is unreliable in
+        // some browsers — the browser reassigns focus to the document after the handler
+        // returns. Deferring to the next tick lets the mousedown finish first.
+        setTimeout(() => {
+            el.focus();
+            try {
+                const range = document.createRange();
+                range.selectNodeContents(el); range.collapse(false);
+                const sel = window.getSelection();
+                sel.removeAllRanges(); sel.addRange(range);
+            } catch (_) { /* ignore if element no longer shown */ }
+        }, 0);
+    }
+
+    _commitText() {
+        const el = this.textInput;
+        if (!el || el.style.display === 'none') return;
+        const text = (el.innerText ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        el.style.display = 'none';
+        const snap = this.history.savePreOp();
+        if (this.editingTextShape) {
+            if (text.trim() === '') {
+                this.state.shapes = this.state.shapes.filter(s => s.id !== this.editingTextShape.id);
+                this.state.selectedId = null;
+            } else {
+                this.editingTextShape.text = text;
+            }
+        } else if (text.trim() !== '') {
+            const shape = new TextShape(
+                this.editingTextPos.x, this.editingTextPos.y, text,
+                this.state.activeFont, this.state.activeFontSize, this.state.activeFontStyle
+            );
+            this.state.shapes.push(shape);
+            this.state.selectedId = shape.id;
+        }
+        this.editingTextShape = null;
+        this.editingTextPos   = null;
+        this.state.editingTextId = null;
+        this.history.commit(snap);
+        this._update();
+    }
+
+    _cancelText() {
+        const el = this.textInput;
+        if (!el) return;
+        el.style.display = 'none';
+        this.editingTextShape = null;
+        this.editingTextPos   = null;
+        this.state.editingTextId = null;
+        this.renderer.render();
     }
 }

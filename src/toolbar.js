@@ -91,21 +91,33 @@ export class Toolbar {
     }
 
     _attachEvents() {
-        this.buttons.forEach(btn => btn.addEventListener('click', () => this._select(btn.dataset.tool)));
+        this.buttons.forEach(btn => {
+            btn.addEventListener('click',    () => this._select(btn.dataset.tool, false));
+            btn.addEventListener('dblclick', () => this._select(btn.dataset.tool, true));
+        });
 
         document.addEventListener('keydown', e => {
             if (e.target !== document.body && e.target.tagName !== 'CANVAS') return;
             if (e.metaKey || e.ctrlKey || e.altKey) return;
-            const map = { s: 'select', r: 'rectangle', e: 'ellipse', l: 'line' };
-            if (map[e.key.toLowerCase()]) this._select(map[e.key.toLowerCase()]);
+            const map = { s: 'select', r: 'rectangle', e: 'ellipse', l: 'line', b: 'bezier', t: 'text' };
+            if (map[e.key.toLowerCase()]) this._select(map[e.key.toLowerCase()], false);
         });
     }
 
-    _select(name) {
+    _select(name, sticky = false) {
         this.state.activeTool = name;
-        const labels = { select: 'Select', rectangle: 'Rektangel', ellipse: 'Ellips', line: 'Linje' };
-        this.buttons.forEach(btn => btn.classList.toggle('active', btn.dataset.tool === name));
+        this.state.toolSticky = sticky;
+        const labels = { select: 'Select', rectangle: 'Rektangel', ellipse: 'Ellips', line: 'Linje', bezier: 'Bezier', text: 'Text' };
+        this.buttons.forEach(btn => {
+            const isActive = btn.dataset.tool === name;
+            btn.classList.toggle('active', isActive);
+            btn.classList.toggle('sticky', isActive && sticky);
+        });
         this.elTool.textContent = `Verktyg: ${labels[name] ?? name}`;
         this.renderer.render();
+    }
+
+    resetToSelect() {
+        this._select('select', false);
     }
 }

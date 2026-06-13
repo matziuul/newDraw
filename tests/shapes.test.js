@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-    normalize, snap, offsetShape,
+    normalize, snap, offsetShape, applyMoveFromOrigin,
     getHandlePoints, hitTestHandle, HS,
-    RectangleShape, EllipseShape, LineShape,
+    RectangleShape, EllipseShape, LineShape, BezierShape, GroupShape,
 } from '../src/shapes.js';
 
 describe('normalize', () => {
@@ -201,5 +201,176 @@ describe('LineShape', () => {
         expect(c.x1).toBe(0); expect(c.y1).toBe(0);
         expect(c.x2).toBe(100); expect(c.y2).toBe(80);
         expect(c.strokeWidth).toBe(3);
+    });
+});
+
+// Helper: corner bezier point (no separate handles)
+const pt = (x, y) => ({ x, y, c1x: x, c1y: y, c2x: x, c2y: y });
+
+describe('BezierShape', () => {
+    it('type is bezier', () => {
+        expect(new BezierShape([]).type).toBe('bezier');
+    });
+
+    it('getBounds of empty bezier', () => {
+        expect(new BezierShape([]).getBounds()).toEqual({ x: 0, y: 0, width: 0, height: 0 });
+    });
+
+    it('getBounds with two corner points', () => {
+        const s = new BezierShape([pt(10, 20), pt(110, 80)]);
+        expect(s.getBounds()).toEqual({ x: 10, y: 20, width: 100, height: 60 });
+    });
+
+    it('getBounds includes control handles outside endpoints', () => {
+        // c2 of first point goes above y=0
+        const s = new BezierShape([
+            { x: 0, y: 0, c1x: 0, c1y: 0, c2x: 50, c2y: -40 },
+            pt(100, 0),
+        ]);
+        expect(s.getBounds().y).toBeLessThan(0);
+    });
+
+    it('getBounds with single point', () => {
+        const s = new BezierShape([pt(30, 40)]);
+        expect(s.getBounds()).toEqual({ x: 30, y: 40, width: 0, height: 0 });
+    });
+
+    it('clone preserves id, fillIdx, strokeWidth, locked', () => {
+        const s = new BezierShape([pt(0, 0), pt(100, 100)]);
+        s.fillIdx = 2; s.strokeWidth = 4; s.locked = true;
+        const c = s.clone();
+        expect(c.id).toBe(s.id);
+        expect(c.fillIdx).toBe(2);
+        expect(c.strokeWidth).toBe(4);
+        expect(c.locked).toBe(true);
+    });
+
+    it('clone deep-copies points', () => {
+        const s = new BezierShape([pt(0, 0), pt(100, 100)]);
+        const c = s.clone();
+        c.points[0].x = 999;
+        expect(s.points[0].x).toBe(0);
+    });
+
+    it('clone has same point count', () => {
+        const s = new BezierShape([pt(0,0), pt(50,50), pt(100,0)]);
+        expect(s.clone().points).toHaveLength(3);
+    });
+});
+
+describe('GroupShape', () => {
+    it('type is group', () => {
+        expect(new GroupShape([]).type).toBe('group');
+    });
+
+    it('getBounds of empty group', () => {
+        expect(new GroupShape([]).getBounds()).toEqual({ x: 0, y: 0, width: 0, height: 0 });
+    });
+
+    it('getBounds wraps all children', () => {
+        const g = new GroupShape([
+            new RectangleShape(10, 20, 50, 30),
+            new RectangleShape(80, 60, 40, 20),
+        ]);
+        expect(g.getBounds()).toEqual({ x: 10, y: 20, width: 110, height: 60 });
+    });
+
+    it('getBounds with single child matches child bounds', () => {
+        const child = new RectangleShape(5, 10, 90, 70);
+        const g = new GroupShape([child]);
+        expect(g.getBounds()).toEqual(child.getBounds());
+    });
+
+    it('hitTest delegates to children — hit', () => {
+        const g = new GroupShape([new RectangleShape(0, 0, 100, 100)]);
+        expect(g.hitTest(50, 50)).toBe(true);
+    });
+
+    it('hitTest delegates to children — miss', () => {
+        const g = new GroupShape([new RectangleShape(0, 0, 100, 100)]);
+        expect(g.hitTest(200, 200)).toBe(false);
+    });
+
+    it('hitTest returns false for empty group', () => {
+        expect(new GroupShape([]).hitTest(0, 0)).toBe(false);
+    });
+
+    it('hitTest returns true if any child is hit', () => {
+        const g = new GroupShape([
+            new RectangleShape(0, 0, 50, 50),
+            new RectangleShape(200, 200, 50, 50),
+        ]);
+        expect(g.hitTest(210, 210)).toBe(true);
+    });
+
+    it('clone preserves id and locked', () => {
+        const g = new GroupShape([new RectangleShape(0, 0, 50, 50)]);
+        g.locked = true;
+        const c = g.clone();
+        expect(c.id).toBe(g.id);
+        expect(c.locked).toBe(true);
+    });
+
+    it('clone deep-copies children', () => {
+        const child = new RectangleShape(0, 0, 100, 100);
+        const g = new GroupShape([child]);
+        const c = g.clone();
+        c.children[0].x = 999;
+        expect(child.x).toBe(0);
+    });
+
+    it('clone has same child count', () => {
+        const g = new GroupShape([
+            new RectangleShape(0,0,50,50), new RectangleShape(100,0,50,50),
+        ]);
+        expect(g.clone().children).toHaveLength(2);
+    });
+});
+
+describe('applyMoveFromOrigin', () => {
+    it('moves a rectangle by (dx, dy) from origin', () => {
+        const s = new RectangleShape(10, 20, 100, 80);
+        const origin = s.clone();
+        applyMoveFromOrigin(s, origin, 30, -10);
+        expect(s.x).toBe(40); expect(s.y).toBe(10);
+    });
+
+    it('does not change width/height of rectangle', () => {
+        const s = new RectangleShape(0, 0, 200, 150);
+        applyMoveFromOrigin(s, s.clone(), 50, 50);
+        expect(s.width).toBe(200); expect(s.height).toBe(150);
+    });
+
+    it('moves both endpoints of a line', () => {
+        const s = new LineShape(0, 0, 100, 100);
+        applyMoveFromOrigin(s, s.clone(), 20, 5);
+        expect(s.x1).toBe(20); expect(s.y1).toBe(5);
+        expect(s.x2).toBe(120); expect(s.y2).toBe(105);
+    });
+
+    it('moves group children recursively', () => {
+        const c1 = new RectangleShape(0, 0, 50, 50);
+        const c2 = new RectangleShape(100, 0, 50, 50);
+        const g = new GroupShape([c1, c2]);
+        const origin = g.clone();
+        applyMoveFromOrigin(g, origin, 20, 10);
+        expect(g.children[0].x).toBe(20); expect(g.children[0].y).toBe(10);
+        expect(g.children[1].x).toBe(120); expect(g.children[1].y).toBe(10);
+    });
+
+    it('zero delta leaves shape unchanged', () => {
+        const s = new RectangleShape(50, 60, 100, 80);
+        applyMoveFromOrigin(s, s.clone(), 0, 0);
+        expect(s.x).toBe(50); expect(s.y).toBe(60);
+    });
+
+    it('moves bezier points and handles', () => {
+        const p = { x: 10, y: 20, c1x: 5, c1y: 15, c2x: 15, c2y: 25 };
+        const s = new BezierShape([{ ...p }]);
+        const origin = s.clone();
+        applyMoveFromOrigin(s, origin, 10, 10);
+        expect(s.points[0].x).toBe(20);  expect(s.points[0].y).toBe(30);
+        expect(s.points[0].c1x).toBe(15); expect(s.points[0].c1y).toBe(25);
+        expect(s.points[0].c2x).toBe(25); expect(s.points[0].c2y).toBe(35);
     });
 });

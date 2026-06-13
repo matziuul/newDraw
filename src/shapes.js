@@ -296,3 +296,85 @@ export class GroupShape {
         for (const c of this.children) c.draw(ctx, patterns, qd);
     }
 }
+
+export class TextShape {
+    constructor(x, y, text = '', fontFamily = 'Geneva', fontSize = 12, fontStyle = 0) {
+        this.id = nextUid(); this.type = 'text';
+        this.x = x; this.y = y;
+        this.text = text;
+        this.fontFamily = fontFamily;
+        this.fontSize = fontSize;
+        this.fontStyle = fontStyle; // bitmask: 1=bold 2=italic 4=underline 8=outline 16=shadow
+        this.fillIdx = 0; this.strokeWidth = 0; this.locked = false;
+    }
+
+    _cssFont() {
+        const bold   = (this.fontStyle & 1) ? 'bold '   : '';
+        const italic = (this.fontStyle & 2) ? 'italic ' : '';
+        return `${italic}${bold}${this.fontSize}px ${fontCss(this.fontFamily)}`;
+    }
+
+    _lineHeight() { return Math.ceil(this.fontSize * 1.25); }
+
+    getBounds() {
+        const ctx = getScratchCtx();
+        ctx.font = this._cssFont();
+        const lines = this.text ? this.text.split('\n') : [''];
+        const maxW = Math.max(...lines.map(l => ctx.measureText(l || ' ').width), 20);
+        return { x: this.x, y: this.y, width: maxW, height: lines.length * this._lineHeight() };
+    }
+
+    hitTest(px, py) {
+        const b = this.getBounds();
+        return px >= b.x && px <= b.x + b.width && py >= b.y && py <= b.y + b.height;
+    }
+
+    clone() {
+        const t = new TextShape(this.x, this.y, this.text, this.fontFamily, this.fontSize, this.fontStyle);
+        t.id = this.id; t.locked = this.locked;
+        return t;
+    }
+
+    draw(ctx, _p, _q) {
+        if (!this.text) return;
+        const lines = this.text.split('\n');
+        const lh = this._lineHeight();
+        ctx.save();
+        ctx.font = this._cssFont();
+        ctx.textBaseline = 'top';
+
+        const hasShadow    = !!(this.fontStyle & 16);
+        const hasOutline   = !!(this.fontStyle & 8);
+        const hasUnderline = !!(this.fontStyle & 4);
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const tx = this.x, ty = this.y + i * lh;
+            if (hasShadow) {
+                ctx.fillStyle = 'rgba(0,0,0,0.35)';
+                ctx.fillText(line, tx + 2, ty + 2);
+            }
+            if (hasOutline) {
+                ctx.fillStyle = 'white';
+                ctx.fillText(line, tx, ty);
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = Math.max(1, this.fontSize / 14);
+                ctx.lineJoin = 'round';
+                ctx.strokeText(line, tx, ty);
+            } else {
+                ctx.fillStyle = 'black';
+                ctx.fillText(line, tx, ty);
+            }
+            if (hasUnderline) {
+                const w = ctx.measureText(line).width;
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = Math.max(1, Math.round(this.fontSize / 12));
+                ctx.beginPath();
+                ctx.moveTo(tx, ty + this.fontSize + 1);
+                ctx.lineTo(tx + w, ty + this.fontSize + 1);
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+    }
+}

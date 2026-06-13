@@ -18,8 +18,9 @@ const ruler    = new Ruler(
     state
 );
 
+const textInput      = document.getElementById('textInput');
 const toolbar        = new Toolbar(state, renderer, history);
-const toolController = new ToolController(state, renderer, history, ruler, canvas, toolbar);
+const toolController = new ToolController(state, renderer, history, ruler, canvas, toolbar, textInput);
 new GridControls(state, renderer, ruler);
 
 // ── File import ───────────────────────────────────────────────────────────────
