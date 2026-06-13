@@ -1,5 +1,14 @@
 import { fontCss } from './text-defs.js';
 
+export const STROKE_DASHES = [
+    { name: 'Heldragen',   dash: [] },
+    { name: 'Streckad',    dash: [10, 5] },
+    { name: 'Prickad',     dash: [2, 5] },
+    { name: 'Streck-pkt',  dash: [10, 5, 2, 5] },
+    { name: 'Lång streck', dash: [20, 5] },
+    { name: 'Dubbelpkt',   dash: [10, 5, 2, 5, 2, 5] },
+];
+
 export const HANDLE_DEFS = [
     { id: 'nw', cursor: 'nw-resize' }, { id: 'n', cursor: 'n-resize'  },
     { id: 'ne', cursor: 'ne-resize' }, { id: 'e', cursor: 'e-resize'  },
@@ -93,7 +102,7 @@ export class RectangleShape {
     constructor(x, y, w, h) {
         this.id = nextUid(); this.type = 'rectangle';
         this.x = x; this.y = y; this.width = w; this.height = h;
-        this.fillIdx = 0; this.strokeWidth = 2; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
     }
 
     getBounds() { return normalize(this.x, this.y, this.width, this.height); }
@@ -105,7 +114,7 @@ export class RectangleShape {
 
     clone() {
         const s = new RectangleShape(this.x, this.y, this.width, this.height);
-        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.locked = this.locked;
+        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
         return s;
     }
 
@@ -115,10 +124,11 @@ export class RectangleShape {
         const pw = qd ? snap(width) : width, ph = qd ? snap(height) : height;
         ctx.save();
         ctx.lineWidth = this.strokeWidth;
+        ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
         const pat = patterns[this.fillIdx];
         if (pat) { ctx.fillStyle = pat; ctx.fillRect(px - 0.5, py - 0.5, pw, ph); }
-        ctx.strokeStyle = 'black';
-        ctx.strokeRect(px, py, pw, ph);
+        const strokePat = patterns[this.strokePatternIdx ?? 3];
+        if (strokePat !== null) { ctx.strokeStyle = strokePat; ctx.strokeRect(px, py, pw, ph); }
         ctx.restore();
     }
 }
@@ -127,7 +137,7 @@ export class EllipseShape {
     constructor(x, y, w, h) {
         this.id = nextUid(); this.type = 'ellipse';
         this.x = x; this.y = y; this.width = w; this.height = h;
-        this.fillIdx = 0; this.strokeWidth = 2; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
     }
 
     getBounds() { return normalize(this.x, this.y, this.width, this.height); }
@@ -142,7 +152,7 @@ export class EllipseShape {
 
     clone() {
         const s = new EllipseShape(this.x, this.y, this.width, this.height);
-        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.locked = this.locked;
+        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
         return s;
     }
 
@@ -152,12 +162,13 @@ export class EllipseShape {
         const pw = qd ? snap(width) : width, ph = qd ? snap(height) : height;
         ctx.save();
         ctx.lineWidth = this.strokeWidth;
+        ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
         ctx.beginPath();
         ctx.ellipse(px + pw / 2, py + ph / 2, pw / 2, ph / 2, 0, 0, Math.PI * 2);
         const pat = patterns[this.fillIdx];
         if (pat) { ctx.fillStyle = pat; ctx.fill(); }
-        ctx.strokeStyle = 'black';
-        ctx.stroke();
+        const strokePat = patterns[this.strokePatternIdx ?? 3];
+        if (strokePat !== null) { ctx.strokeStyle = strokePat; ctx.stroke(); }
         ctx.restore();
     }
 }
@@ -166,7 +177,7 @@ export class LineShape {
     constructor(x1, y1, x2, y2) {
         this.id = nextUid(); this.type = 'line';
         this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2;
-        this.fillIdx = 0; this.strokeWidth = 2; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
     }
 
     getBounds() {
@@ -186,17 +197,20 @@ export class LineShape {
 
     clone() {
         const s = new LineShape(this.x1, this.y1, this.x2, this.y2);
-        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.locked = this.locked;
+        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
         return s;
     }
 
-    draw(ctx, _patterns, qd) {
+    draw(ctx, patterns, qd) {
         const x1 = qd ? snap(this.x1) + 0.5 : this.x1;
         const y1 = qd ? snap(this.y1) + 0.5 : this.y1;
         const x2 = qd ? snap(this.x2) + 0.5 : this.x2;
         const y2 = qd ? snap(this.y2) + 0.5 : this.y2;
+        const strokePat = patterns[this.strokePatternIdx ?? 3];
+        if (strokePat === null) return;
         ctx.save();
-        ctx.strokeStyle = 'black'; ctx.lineWidth = this.strokeWidth;
+        ctx.strokeStyle = strokePat; ctx.lineWidth = this.strokeWidth;
+        ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
         ctx.restore();
     }
@@ -219,7 +233,7 @@ export class BezierShape {
     constructor(points = []) {
         this.id = nextUid(); this.type = 'bezier';
         this.points = points;
-        this.fillIdx = 0; this.strokeWidth = 2; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
     }
 
     _makePath() {
@@ -250,19 +264,71 @@ export class BezierShape {
 
     clone() {
         const b = new BezierShape(this.points.map(p => ({ ...p })));
-        b.id = this.id; b.fillIdx = this.fillIdx; b.strokeWidth = this.strokeWidth; b.locked = this.locked;
+        b.id = this.id; b.fillIdx = this.fillIdx; b.strokeWidth = this.strokeWidth; b.strokeDash = this.strokeDash; b.strokePatternIdx = this.strokePatternIdx; b.locked = this.locked;
         return b;
     }
 
     draw(ctx, patterns, _qd) {
         if (this.points.length < 2) return;
+        const strokePat = patterns[this.strokePatternIdx ?? 3];
         ctx.save();
-        ctx.strokeStyle = 'black'; ctx.lineWidth = this.strokeWidth;
+        ctx.lineWidth = this.strokeWidth;
         ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
         const path = this._makePath();
         const pat = patterns[this.fillIdx];
         if (pat) { ctx.fillStyle = pat; ctx.fill(path); }
-        ctx.stroke(path);
+        if (strokePat !== null) { ctx.strokeStyle = strokePat; ctx.stroke(path); }
+        ctx.restore();
+    }
+}
+
+export class RoundRectShape {
+    constructor(x, y, w, h) {
+        this.id = nextUid(); this.type = 'roundrect';
+        this.x = x; this.y = y; this.width = w; this.height = h;
+        this.cornerRadius = 10;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
+    }
+
+    getBounds() { return normalize(this.x, this.y, this.width, this.height); }
+
+    hitTest(px, py) {
+        const { x, y, width, height } = this.getBounds();
+        return px >= x && px <= x + width && py >= y && py <= y + height;
+    }
+
+    clone() {
+        const s = new RoundRectShape(this.x, this.y, this.width, this.height);
+        s.id = this.id; s.cornerRadius = this.cornerRadius;
+        s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
+        return s;
+    }
+
+    _makePath(x, y, w, h) {
+        const r = Math.min(this.cornerRadius, w / 2, h / 2);
+        const p = new Path2D();
+        p.moveTo(x + r, y);
+        p.lineTo(x + w - r, y);       p.arcTo(x + w, y,     x + w, y + r,     r);
+        p.lineTo(x + w, y + h - r);   p.arcTo(x + w, y + h, x + w - r, y + h, r);
+        p.lineTo(x + r, y + h);       p.arcTo(x,     y + h, x,     y + h - r, r);
+        p.lineTo(x, y + r);           p.arcTo(x,     y,     x + r, y,         r);
+        p.closePath();
+        return p;
+    }
+
+    draw(ctx, patterns, qd) {
+        const { x, y, width, height } = this.getBounds();
+        const px = qd ? snap(x) : x, py = qd ? snap(y) : y;
+        const pw = qd ? snap(width) : width, ph = qd ? snap(height) : height;
+        ctx.save();
+        ctx.lineWidth = this.strokeWidth;
+        ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
+        const path = this._makePath(px, py, pw, ph);
+        const pat = patterns[this.fillIdx];
+        if (pat) { ctx.fillStyle = pat; ctx.fill(path); }
+        const strokePat = patterns[this.strokePatternIdx ?? 3];
+        if (strokePat !== null) { ctx.strokeStyle = strokePat; ctx.stroke(path); }
         ctx.restore();
     }
 }

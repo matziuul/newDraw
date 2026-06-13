@@ -1,5 +1,5 @@
 import { QD_PATTERNS, buildPattern } from './patterns.js';
-import { normalize } from './shapes.js';
+import { normalize, STROKE_DASHES } from './shapes.js';
 
 function buildFillsImage(shapes, width, height) {
     const canvas = document.createElement('canvas');
@@ -15,6 +15,16 @@ function buildFillsImage(shapes, width, height) {
         if (shape.type === 'rectangle') {
             const { x, y, width: w, height: h } = normalize(shape.x, shape.y, shape.width, shape.height);
             ctx.fillRect(x, y, w, h);
+        } else if (shape.type === 'roundrect') {
+            const { x, y, width: w, height: h } = normalize(shape.x, shape.y, shape.width, shape.height);
+            const r = Math.min(shape.cornerRadius ?? 10, w / 2, h / 2);
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);       ctx.arcTo(x + w, y,     x + w, y + r,     r);
+            ctx.lineTo(x + w, y + h - r);   ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+            ctx.lineTo(x + r, y + h);       ctx.arcTo(x,     y + h, x,     y + h - r, r);
+            ctx.lineTo(x, y + r);           ctx.arcTo(x,     y,     x + r, y,         r);
+            ctx.closePath(); ctx.fill();
         } else if (shape.type === 'ellipse') {
             const { x, y, width: w, height: h } = normalize(shape.x, shape.y, shape.width, shape.height);
             ctx.beginPath();
@@ -26,12 +36,57 @@ function buildFillsImage(shapes, width, height) {
     return canvas.toDataURL('image/png');
 }
 
+function patternTileDataUrl(rows) {
+    const c = document.createElement('canvas');
+    c.width = 8; c.height = 8;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(8, 8);
+    for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+            const on = rows[y] & (1 << (7 - x));
+            const i = (y * 8 + x) * 4;
+            img.data[i] = img.data[i+1] = img.data[i+2] = on ? 0 : 255;
+            img.data[i+3] = 255;
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+    return c.toDataURL('image/png');
+}
+
+function buildStrokePatternDefs(shapes) {
+    const indices = [...new Set(shapes.map(s => s.strokePatternIdx ?? 3))]
+        .filter(i => i !== 0 && i !== 3 && QD_PATTERNS[i]?.rows);
+    if (!indices.length) return '';
+    const defs = indices.map(i => {
+        const url = patternTileDataUrl(QD_PATTERNS[i].rows);
+        return `<pattern id="sp${i}" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse"><image href="${url}" width="8" height="8"/></pattern>`;
+    }).join('\n    ');
+    return `<defs>\n    ${defs}\n  </defs>`;
+}
+
+function strokeAttr(shape) {
+    const idx = shape.strokePatternIdx ?? 3;
+    if (idx === 0) return 'stroke="none"';
+    if (idx === 3) return 'stroke="black"';
+    return `stroke="url(#sp${idx})"`;
+}
+
+function dashAttr(shape) {
+    const dash = STROKE_DASHES[shape.strokeDash ?? 0]?.dash;
+    return dash?.length ? ` stroke-dasharray="${dash.join(' ')}"` : '';
+}
+
 function shapeToSvg(shape) {
-    const sw = `stroke="black" stroke-width="${shape.strokeWidth}"`;
+    const sw = `${strokeAttr(shape)} stroke-width="${shape.strokeWidth}"${dashAttr(shape)}`;
 
     if (shape.type === 'rectangle') {
         const { x, y, width, height } = normalize(shape.x, shape.y, shape.width, shape.height);
         return `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="none" ${sw}/>`;
+    }
+    if (shape.type === 'roundrect') {
+        const { x, y, width, height } = normalize(shape.x, shape.y, shape.width, shape.height);
+        const r = Math.min(shape.cornerRadius ?? 10, width / 2, height / 2);
+        return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${r}" ry="${r}" fill="none" ${sw}/>`;
     }
     if (shape.type === 'ellipse') {
         const { x, y, width, height } = normalize(shape.x, shape.y, shape.width, shape.height);
@@ -39,7 +94,7 @@ function shapeToSvg(shape) {
         return `<ellipse cx="${cx}" cy="${cy}" rx="${width / 2}" ry="${height / 2}" fill="none" ${sw}/>`;
     }
     if (shape.type === 'line') {
-        return `<line x1="${shape.x1}" y1="${shape.y1}" x2="${shape.x2}" y2="${shape.y2}" stroke="black" stroke-width="${shape.strokeWidth}" stroke-linecap="round"/>`;
+        return `<line x1="${shape.x1}" y1="${shape.y1}" x2="${shape.x2}" y2="${shape.y2}" ${strokeAttr(shape)} stroke-width="${shape.strokeWidth}"${dashAttr(shape)} stroke-linecap="round"/>`;
     }
     if (shape.type === 'bezier' && shape.points.length >= 2) {
         const pts = shape.points;
@@ -47,7 +102,7 @@ function shapeToSvg(shape) {
         for (let i = 1; i < pts.length; i++) {
             d += ` C ${pts[i-1].c2x} ${pts[i-1].c2y} ${pts[i].c1x} ${pts[i].c1y} ${pts[i].x} ${pts[i].y}`;
         }
-        return `<path d="${d}" fill="none" stroke="black" stroke-width="${shape.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>`;
+        return `<path d="${d}" fill="none" ${strokeAttr(shape)} stroke-width="${shape.strokeWidth}"${dashAttr(shape)} stroke-linecap="round" stroke-linejoin="round"/>`;
     }
     return '';
 }
@@ -57,8 +112,9 @@ export function buildSvg(shapes, width, height) {
     const fillsLayer = hasFills
         ? `<image href="${buildFillsImage(shapes, width, height)}" width="${width}" height="${height}"/>`
         : '';
+    const defs = buildStrokePatternDefs(shapes);
     const body = shapes.map(shapeToSvg).join('\n  ');
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">\n  ${fillsLayer}\n  ${body}\n</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">\n  ${defs}\n  ${fillsLayer}\n  ${body}\n</svg>`;
 }
 
 export function printDrawing(shapes, width, height) {

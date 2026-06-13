@@ -1,4 +1,4 @@
-import { RectangleShape, EllipseShape, LineShape } from './shapes.js';
+import { RectangleShape, EllipseShape, LineShape, TextShape, RoundRectShape } from './shapes.js';
 import { QD_PATTERNS } from './patterns.js';
 
 // ─── Public entry point ───────────────────────────────────────────────────────
@@ -73,9 +73,10 @@ class PictParser {
     constructor(view, bytes, hdr) {
         this.v = view; this.b = bytes; this.o = hdr;
         this.shapes = [];
-        this.penW   = 1;
-        this.penPat = 5;  // solid black
-        this.fillPat = 0; // no fill
+        this.penW    = 1;
+        this.penPat  = 5;  // solid black
+        this.fillPat = 0;  // no fill
+        this.ovalSize = 10; // corner radius for rounded rects
         this.lastRect = null;
         this.lastPt   = { x: 0, y: 0 };
         this.isV2 = false;
@@ -104,6 +105,13 @@ class PictParser {
     }
     oval(r, strokeOnly) {
         const s = new EllipseShape(r.l, r.t, r.r-r.l, r.b-r.t);
+        s.fillIdx = strokeOnly ? 0 : this.fillPat;
+        s.strokeWidth = this.penW;
+        return s;
+    }
+    rrect(r, strokeOnly) {
+        const s = new RoundRectShape(r.l, r.t, r.r-r.l, r.b-r.t);
+        s.cornerRadius = this.ovalSize;
         s.fillIdx = strokeOnly ? 0 : this.fillPat;
         s.strokeWidth = this.penW;
         return s;
@@ -169,7 +177,7 @@ class PictParser {
         case 0x08: this.skip(2); break;  // PnMode
         case 0x09: this.penPat  = matchPattern(this.readPat()); break; // PnPat
         case 0x0A: this.fillPat = matchPattern(this.readPat()); break; // FillPat
-        case 0x0B: this.skip(4); break;  // OvSize
+        case 0x0B: { const h=this.i16(), w=this.i16(); this.ovalSize = Math.round((h+w)/2); break; } // OvSize
         case 0x0C: this.skip(4); break;  // Origin
         case 0x0D: this.skip(2); break;  // TxSize
         case 0x0E: this.skip(4); break;  // FgColor
@@ -227,14 +235,14 @@ class PictParser {
         case 0x3A: case 0x3B: break;
         case 0x3C: { if(this.lastRect) { const s=this.rect(this.lastRect,false); s.strokeWidth=0; this.shapes.push(s); } break; }
 
-        // ── Rounded rect (rendered as plain rect) ──
-        case 0x40: { const r=this.readRect(); this.lastRect=r; this.shapes.push(this.rect(r,true)); break; }
+        // ── Rounded rect ──
+        case 0x40: { const r=this.readRect(); this.lastRect=r; this.shapes.push(this.rrect(r,true)); break; }
         case 0x41: { const r=this.readRect(); this.lastRect=r;
-            const s=this.rect(r,false); s.fillIdx=this.penPat; this.shapes.push(s); break; }
+            const s=this.rrect(r,false); s.fillIdx=this.penPat; this.shapes.push(s); break; }
         case 0x42: { this.readRect(); break; }
         case 0x43: { this.readRect(); break; }
         case 0x44: { const r=this.readRect(); this.lastRect=r;
-            const s=this.rect(r,false); s.strokeWidth=0; this.shapes.push(s); break; }
+            const s=this.rrect(r,false); s.strokeWidth=0; this.shapes.push(s); break; }
         case 0x48: case 0x49: case 0x4A: case 0x4B: case 0x4C: break; // same-rrect, 0 bytes
 
         // ── Oval ──
@@ -346,125 +354,175 @@ class PictParser {
 function parseMacDraw(buffer, bytes) {
     const view = new DataView(buffer);
     const shapes = [];
+    const scale  = 96 / 72;
 
-    // Locate the start of object records.
-    // MacDraw II data fork: 2-byte version, then a 120-byte print record,
-    // then a variable settings block, then objects.
-    // We scan forward for the first plausible object record header.
-    let o = findMacDrawObjects(view, bytes);
-    if (o < 0) throw new Error('MacDraw II: could not locate drawing objects in file.');
+    const startOffset = findMacDrawObjects(bytes);
+    if (startOffset < 0) throw new Error('MacDraw II: could not locate drawing objects in file.');
 
-    const limit = bytes.length - 4;
-    while (o < limit) {
-        const type = view.getUint16(o, false);
-        const size = view.getUint16(o + 2, false);
-
-        if (type === 0x0000 || size === 0) break;          // end sentinel
-        if (size < 4 || o + size > bytes.length) break;   // corrupt
-
-        const shape = parseMacDrawObject(view, o, type, size);
-        if (shape) shapes.push(shape);
-
-        o += size;
+    // Collect all record-start positions (02 03 type flags, type < 0x20)
+    const recs = [];
+    for (let i = startOffset; i < bytes.length - 3; i++) {
+        if (bytes[i] === 0x02 && bytes[i+1] === 0x03 && bytes[i+2] < 0x20) recs.push(i);
     }
+    recs.push(bytes.length);
+
+    for (let ri = 0; ri < recs.length - 1; ri++) {
+        const o = recs[ri];
+        if (recs[ri+1] - o < 20) continue; // too small for coordinate data (group containers etc.)
+
+        const type = bytes[o+2], flags = bytes[o+3];
+        const shape = parseMacDrawRecord(view, bytes, o, type, flags, scale);
+        if (shape) shapes.push(shape);
+    }
+
+    // Second pass: extract text objects
+    for (const t of parseMacDrawText(view, bytes, scale)) shapes.push(t);
 
     return shapes;
 }
 
-// Heuristic: walk forward until we find a sequence of bytes that looks like
-// the start of a valid MacDraw object record (plausible type + size).
-function findMacDrawObjects(view, bytes) {
-    // Known header sizes where objects typically start
-    for (const start of [128, 256, 512]) {
-        if (start + 4 > bytes.length) continue;
-        const type = view.getUint16(start, false);
-        const size = view.getUint16(start + 2, false);
-        if (isPlausibleType(type) && size >= 20 && size <= 4096) return start;
+// ─── Text extraction ──────────────────────────────────────────────────────────
+
+function macDrawReadString(bytes, start) {
+    let s = '';
+    for (let i = start; i < bytes.length && i < start + 300; i++) {
+        const c = bytes[i];
+        if (c === 0x01 || c === 0x00) break;
+        if (c === 0x0D || c === 0x0A) { s += '\n'; continue; }
+        if (c >= 32 && c < 127) s += String.fromCharCode(c);
+        else break;
     }
-    // Scan from offset 4 looking for a valid object header
-    for (let o = 4; o < Math.min(bytes.length - 4, 1024); o += 2) {
-        const type = view.getUint16(o, false);
-        const size = view.getUint16(o + 2, false);
-        if (isPlausibleType(type) && size >= 20 && size < 512) return o;
+    return s;
+}
+
+function isPrintableAt(bytes, off, minRun) {
+    for (let i = 0; i < minRun; i++) {
+        if (off + i >= bytes.length) return false;
+        const c = bytes[off + i];
+        if ((c < 32 || c >= 127) && c !== 0x0D && c !== 0x0A) return false;
+    }
+    return true;
+}
+
+function parseMacDrawText(view, bytes, scale) {
+    // Two-pass: collect typed inner records first (0x01/0x1A), then 0x02 wrappers.
+    // This way inner-record positions win over outer wrapper positions for same text.
+    const entries = [];  // { text, x, y, priority }
+
+    for (const pass of [0, 1]) {
+        for (let i = 0x200; i < bytes.length - 30; i++) {
+            if (bytes[i] !== 0x02 || bytes[i+1] !== 0x03) continue;
+            const type = bytes[i+2], flags = bytes[i+3];
+            const isWrapper = (type === 0x02 && flags === 0x00);
+            if (pass === 0 && isWrapper) continue;   // typed records first
+            if (pass === 1 && !isWrapper) continue;  // wrappers second
+
+            let textOff = -1, x = 0, y = 0;
+
+            if (type === 0x01 && flags === 0x01) {
+                if (i + 12 > bytes.length) continue;
+                textOff = 15;
+                x = view.getInt16(i + 8,  true) * scale;
+                y = view.getInt16(i + 10, true) * scale;
+            } else if (type === 0x1A) {
+                if (i + 14 > bytes.length) continue;
+                textOff = 19;
+                x = view.getInt16(i + 10, true) * scale;
+                y = view.getInt16(i + 12, true) * scale;
+            } else if (isWrapper) {
+                // Skip if valid geometric bbox (top >= 5 and left >= 5 pts).
+                const top2  = view.getInt16(i + 4,  false) + view.getUint16(i + 6,  false) / 65536;
+                const left2 = view.getInt16(i + 8,  false) + view.getUint16(i + 10, false) / 65536;
+                const bot2  = view.getInt16(i + 12, false) + view.getUint16(i + 14, false) / 65536;
+                const rgt2  = view.getInt16(i + 16, false) + view.getUint16(i + 18, false) / 65536;
+                const w2 = rgt2 - left2, h2 = bot2 - top2;
+                if (top2 >= 5 && left2 >= 5 && w2 > 0 && h2 > 0 && w2 < 5000 && h2 < 5000) continue;
+                if (i + 22 > bytes.length) continue;
+                textOff = 24;
+                y = view.getInt16(i + 14, false) * scale;
+                x = view.getInt16(i + 20, false) * scale;
+            } else {
+                continue;
+            }
+
+            if (i + textOff >= bytes.length) continue;
+            if (!isPrintableAt(bytes, i + textOff, 3)) continue;
+            const text = macDrawReadString(bytes, i + textOff);
+            if (!text || text.trim().length < 2) continue;
+            entries.push({ text, x, y });
+        }
+    }
+
+    // Deduplicate by text content (first occurrence — typed inner records — wins)
+    const seenText = new Set();
+    const shapes = [];
+    for (const { text, x, y } of entries) {
+        const key = text.trim().slice(0, 30);
+        if (seenText.has(key)) continue;
+        seenText.add(key);
+        shapes.push(new TextShape(x, y, text, 'Geneva', 12, 0));
+    }
+    return shapes;
+}
+
+// MacDraw II DRWG format: 512-byte header + 4-byte section marker at 0x200 → records from 0x204.
+// The first record always starts with 02 03.
+function findMacDrawObjects(bytes) {
+    if (bytes.length >= 0x208 &&
+        bytes[0] === 0x44 && bytes[1] === 0x52 && bytes[2] === 0x57 && bytes[3] === 0x47 &&
+        bytes[0x204] === 0x02 && bytes[0x205] === 0x03 && bytes[0x206] < 0x20) {
+        return 0x204;
+    }
+    // Fallback scan for the first 02 03 [type < 0x20] beyond any header
+    for (let i = 4; i < Math.min(bytes.length - 3, 2048); i++) {
+        if (bytes[i] === 0x02 && bytes[i+1] === 0x03 && bytes[i+2] < 0x20) return i;
     }
     return -1;
 }
 
-function isPlausibleType(t) {
-    return t >= 1 && t <= 16;
+// Each record: [02][03][type][flags] + 4 × Fixed16.16 bounding rect (top, left, bottom, right)
+// Coordinates are 72 DPI page units; scale × (96/72) = × (4/3) to reach canvas pixels.
+function readFixed(view, offset) {
+    return view.getInt16(offset, false) + view.getUint16(offset + 2, false) / 65536;
 }
 
-// Object type codes (MacDraw II internal, best-guess from reverse engineering)
-const MD_LINE  = 1;
-const MD_RECT  = 2;
-const MD_RRECT = 3;
-const MD_OVAL  = 4;
-const MD_ARC   = 5;
-const MD_POLY  = 6;
-const MD_TEXT  = 7;
-const MD_BEZ   = 8;
-const MD_GROUP = 9;
+function parseMacDrawRecord(view, bytes, o, type, flags, scale) {
+    if (o + 20 > bytes.length) return null;
 
-function parseMacDrawObject(view, o, type, size) {
-    // Common layout after the 4-byte type+size header:
-    //   Rect bounds (8 bytes): top, left, bottom, right  as int16 BE
-    //   Style block (variable): patterns, pen size, etc.
-    //   Type-specific data
-    if (o + 12 > view.byteLength) return null;
+    const top  = readFixed(view, o + 4);
+    const left = readFixed(view, o + 8);
+    const bot  = readFixed(view, o + 12);
+    const rgt  = readFixed(view, o + 16);
 
-    const top  = view.getInt16(o + 4, false);
-    const left = view.getInt16(o + 6, false);
-    const bot  = view.getInt16(o + 8, false);
-    const rgt  = view.getInt16(o + 10, false);
+    const x = Math.round(left * scale);
+    const y = Math.round(top  * scale);
+    const w = Math.round((rgt - left) * scale);
+    const h = Math.round((bot - top)  * scale);
 
-    const x = left, y = top, w = rgt - left, h = bot - top;
-    if (Math.abs(w) > 8000 || Math.abs(h) > 8000) return null; // sanity check
-
-    // Style bytes (best guess: pen pattern @ +12, fill pattern @ +20, pen size @ +28)
-    let penPat = 5, fillPat = 0, penW = 1;
-    if (o + 36 <= view.byteLength) {
-        const penRows  = [];
-        const fillRows = [];
-        for (let i = 0; i < 8; i++) penRows.push(view.getUint8(o + 12 + i));
-        for (let i = 0; i < 8; i++) fillRows.push(view.getUint8(o + 20 + i));
-        penPat  = matchPattern(penRows);
-        fillPat = matchPattern(fillRows);
-        penW    = Math.max(1, view.getUint16(o + 28, false));
-        if (penW > 32) penW = 1;
-    }
-
-    let shape = null;
+    if (w <= 0 || h <= 0 || x < -200 || y < -200 || x > 5000 || y > 5000 || w > 5000 || h > 5000) return null;
+    // Require meaningful page coordinates — rejects false-positives whose bbox bytes encode
+    // non-coordinate data with near-zero fractional Fixed16.16 top/left values.
+    if (top < 5 || left < 5) return null;
 
     switch (type) {
-    case MD_LINE: {
-        // Line: two endpoints stored after the common bounds header
-        // (bounds top-left = pt1, bounds bottom-right = pt2 is one interpretation)
-        const s = new LineShape(left, top, rgt, bot);
-        s.strokeWidth = penW;
-        shape = s;
-        break;
-    }
-    case MD_RECT: {
+    case 0x02: { // RECT — no fill, just border
         const s = new RectangleShape(x, y, w, h);
-        s.fillIdx = fillPat; s.strokeWidth = penW;
-        shape = s;
-        break;
+        s.fillIdx = 0; s.strokeWidth = 1;
+        return s;
     }
-    case MD_RRECT: {
-        const s = new RectangleShape(x, y, w, h);
-        s.fillIdx = fillPat; s.strokeWidth = penW;
-        shape = s;
-        break;
-    }
-    case MD_OVAL: {
+    case 0x04: // OVAL — diagonal medium-dark fill
+    case 0x11: { // OVAL variant — same fill
         const s = new EllipseShape(x, y, w, h);
-        s.fillIdx = fillPat; s.strokeWidth = penW;
-        shape = s;
-        break;
+        s.fillIdx = 14; // QD_PATTERNS[14] = 'diag ↘↘' (diagonal lines, medium-dark)
+        s.strokeWidth = 1;
+        return s;
     }
-    // Arc, polygon, bezier, text: skip for now
-    default: break;
+    case 0x0F: { // Small rect with light line fill
+        const s = new RectangleShape(x, y, w, h);
+        s.fillIdx = 20; // QD_PATTERNS[20] = 'h-gles' (light horizontal lines)
+        s.strokeWidth = 1;
+        return s;
     }
-
-    return shape;
+    default: return null;
+    }
 }

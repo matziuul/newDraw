@@ -76,6 +76,15 @@ export class Renderer {
                 ctx.beginPath();
                 ctx.ellipse(x + width/2, y + height/2, width/2, height/2, 0, 0, Math.PI*2);
                 ctx.stroke();
+            } else if (d.type === 'roundrect') {
+                const r = Math.min(10, width / 2, height / 2);
+                ctx.beginPath();
+                ctx.moveTo(x + r, y);
+                ctx.lineTo(x + width - r, y);       ctx.arcTo(x + width, y,          x + width, y + r,          r);
+                ctx.lineTo(x + width, y + height - r); ctx.arcTo(x + width, y + height, x + width - r, y + height, r);
+                ctx.lineTo(x + r, y + height);      ctx.arcTo(x,         y + height, x,          y + height - r, r);
+                ctx.lineTo(x, y + r);               ctx.arcTo(x,         y,          x + r,      y,              r);
+                ctx.closePath(); ctx.stroke();
             } else {
                 ctx.strokeRect(x + 0.5, y + 0.5, width, height);
             }

@@ -1,6 +1,6 @@
 import {
     hitTestHandle, hitTestBezierHandle, HANDLE_DEFS,
-    RectangleShape, EllipseShape, LineShape, BezierShape, TextShape,
+    RectangleShape, EllipseShape, LineShape, BezierShape, TextShape, RoundRectShape,
     nextUid, offsetShape, applyMoveFromOrigin,
 } from './shapes.js';
 import { fontCss } from './text-defs.js';
@@ -88,8 +88,10 @@ export class ToolController {
         const multi = this.state.selectedIds.length > 1;
         if (sel) {
             if (sel.type !== 'group' && sel.type !== 'text') {
-                this.state.activePatternIdx  = sel.fillIdx;
-                this.state.activeStrokeWidth = sel.strokeWidth;
+                this.state.activePatternIdx       = sel.fillIdx;
+                this.state.activeStrokeWidth      = sel.strokeWidth;
+                this.state.activeStrokeDash       = sel.strokeDash ?? 0;
+                this.state.activeStrokePatternIdx = sel.strokePatternIdx ?? 3;
             }
             if (sel.type === 'text') {
                 this.state.activeFont      = sel.fontFamily;
@@ -540,13 +542,16 @@ export class ToolController {
 
             if (big) {
                 let shape;
-                if (d.type === 'rectangle') shape = new RectangleShape(d.x, d.y, d.width, d.height);
-                else if (d.type === 'ellipse') shape = new EllipseShape(d.x, d.y, d.width, d.height);
-                else if (d.type === 'line')    shape = new LineShape(d.x1, d.y1, d.x2, d.y2);
+                if (d.type === 'rectangle')  shape = new RectangleShape(d.x, d.y, d.width, d.height);
+                else if (d.type === 'ellipse')   shape = new EllipseShape(d.x, d.y, d.width, d.height);
+                else if (d.type === 'line')      shape = new LineShape(d.x1, d.y1, d.x2, d.y2);
+                else if (d.type === 'roundrect') shape = new RoundRectShape(d.x, d.y, d.width, d.height);
 
                 if (shape) {
-                    shape.fillIdx = this.state.activePatternIdx;
-                    shape.strokeWidth = this.state.activeStrokeWidth;
+                    shape.fillIdx          = this.state.activePatternIdx;
+                    shape.strokeWidth      = this.state.activeStrokeWidth;
+                    shape.strokeDash       = this.state.activeStrokeDash;
+                    shape.strokePatternIdx = this.state.activeStrokePatternIdx;
                     this.state.shapes.push(shape);
                     this.state.selectedId = shape.id;
                     this.history.commit(this.preOpSnapshot);
@@ -621,8 +626,10 @@ export class ToolController {
         if (!d || d.type !== 'bezier') return;
         if (d.points.length >= 2) {
             const shape = new BezierShape(d.points);
-            shape.fillIdx = this.state.activePatternIdx;
-            shape.strokeWidth = this.state.activeStrokeWidth;
+            shape.fillIdx          = this.state.activePatternIdx;
+            shape.strokeWidth      = this.state.activeStrokeWidth;
+            shape.strokeDash       = this.state.activeStrokeDash;
+            shape.strokePatternIdx = this.state.activeStrokePatternIdx;
             this.state.shapes.push(shape);
             this.state.selectedId = shape.id;
             this.history.commit(this.preOpSnapshot);

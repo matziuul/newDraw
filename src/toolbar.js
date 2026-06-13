@@ -1,4 +1,5 @@
 import { QD_PATTERNS, buildPattern } from './patterns.js';
+import { STROKE_DASHES } from './shapes.js';
 
 const STROKE_WIDTHS = [1, 2, 3, 4, 6, 8];
 
@@ -10,7 +11,9 @@ export class Toolbar {
         this.buttons = document.querySelectorAll('.tool-button');
         this.elTool  = document.getElementById('statusTool');
         this._buildSwatches();
+        this._buildStrokePatternSwatches();
         this._buildStrokeSwatches();
+        this._buildDashSwatches();
         this._attachEvents();
     }
 
@@ -18,23 +21,23 @@ export class Toolbar {
         const grid = document.getElementById('patternGrid');
         QD_PATTERNS.forEach((p, idx) => {
             const cv = document.createElement('canvas');
-            cv.width = 22; cv.height = 22;
+            cv.width = 18; cv.height = 18;
             cv.className = 'pattern-swatch';
             cv.title = p.name;
             if (idx === 0) cv.classList.add('active');
             const ctx = cv.getContext('2d');
 
             if (p.rows === null) {
-                ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 22, 22);
+                ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 18, 18);
                 ctx.strokeStyle = '#bbb'; ctx.lineWidth = 1;
-                ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(22,22);
-                ctx.moveTo(22,0); ctx.lineTo(0,22); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(18,18);
+                ctx.moveTo(18,0); ctx.lineTo(0,18); ctx.stroke();
             } else {
                 ctx.fillStyle = buildPattern(ctx, p.rows);
-                ctx.fillRect(0, 0, 22, 22);
+                ctx.fillRect(0, 0, 18, 18);
             }
             ctx.strokeStyle = 'black'; ctx.lineWidth = 1;
-            ctx.strokeRect(0.5, 0.5, 21, 21);
+            ctx.strokeRect(0.5, 0.5, 17, 17);
 
             cv.addEventListener('click', () => {
                 this.state.activePatternIdx = idx;
@@ -83,11 +86,85 @@ export class Toolbar {
         });
     }
 
+    _buildStrokePatternSwatches() {
+        const grid = document.getElementById('strokePatternGrid');
+        QD_PATTERNS.forEach((p, idx) => {
+            const cv = document.createElement('canvas');
+            cv.width = 18; cv.height = 18;
+            cv.className = 'stroke-pattern-swatch';
+            cv.title = p.name;
+            if (idx === 3) cv.classList.add('active'); // svart = default
+            const ctx = cv.getContext('2d');
+
+            if (p.rows === null) {
+                ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 18, 18);
+                ctx.strokeStyle = '#bbb'; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(18,18);
+                ctx.moveTo(18,0); ctx.lineTo(0,18); ctx.stroke();
+            } else {
+                ctx.fillStyle = buildPattern(ctx, p.rows);
+                ctx.fillRect(0, 0, 18, 18);
+            }
+            ctx.strokeStyle = 'black'; ctx.lineWidth = 1;
+            ctx.strokeRect(0.5, 0.5, 17, 17);
+
+            cv.addEventListener('click', () => {
+                this.state.activeStrokePatternIdx = idx;
+                const sel = this.state.selectedShape;
+                if (sel && sel.type !== 'text' && sel.type !== 'group') {
+                    const snap = this.history.savePreOp();
+                    sel.strokePatternIdx = idx;
+                    this.history.commit(snap);
+                    this.renderer.render();
+                }
+                this.sync();
+            });
+            grid.appendChild(cv);
+        });
+    }
+
+    _buildDashSwatches() {
+        const grid = document.getElementById('dashGrid');
+        STROKE_DASHES.forEach((d, idx) => {
+            const cv = document.createElement('canvas');
+            cv.width = 48; cv.height = 16;
+            cv.className = 'dash-swatch';
+            cv.title = d.name;
+            if (idx === 0) cv.classList.add('active');
+            const ctx = cv.getContext('2d');
+            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 48, 16);
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 2;
+            ctx.setLineDash(d.dash);
+            ctx.beginPath(); ctx.moveTo(4, 8); ctx.lineTo(44, 8); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.lineWidth = 1;
+            ctx.strokeRect(0.5, 0.5, 47, 15);
+
+            cv.addEventListener('click', () => {
+                this.state.activeStrokeDash = idx;
+                const sel = this.state.selectedShape;
+                if (sel && sel.type !== 'text' && sel.type !== 'group') {
+                    const snap = this.history.savePreOp();
+                    sel.strokeDash = idx;
+                    this.history.commit(snap);
+                    this.renderer.render();
+                }
+                this.sync();
+            });
+            grid.appendChild(cv);
+        });
+    }
+
     sync() {
         document.querySelectorAll('.pattern-swatch').forEach((s, i) =>
             s.classList.toggle('active', i === this.state.activePatternIdx));
+        document.querySelectorAll('.stroke-pattern-swatch').forEach((s, i) =>
+            s.classList.toggle('active', i === this.state.activeStrokePatternIdx));
         document.querySelectorAll('.stroke-swatch').forEach((s, i) =>
             s.classList.toggle('active', STROKE_WIDTHS[i] === this.state.activeStrokeWidth));
+        document.querySelectorAll('.dash-swatch').forEach((s, i) =>
+            s.classList.toggle('active', i === this.state.activeStrokeDash));
     }
 
     _attachEvents() {
@@ -99,7 +176,7 @@ export class Toolbar {
         document.addEventListener('keydown', e => {
             if (e.target !== document.body && e.target.tagName !== 'CANVAS') return;
             if (e.metaKey || e.ctrlKey || e.altKey) return;
-            const map = { s: 'select', r: 'rectangle', e: 'ellipse', l: 'line', b: 'bezier', t: 'text' };
+            const map = { s: 'select', r: 'rectangle', o: 'roundrect', e: 'ellipse', l: 'line', b: 'bezier', t: 'text' };
             if (map[e.key.toLowerCase()]) this._select(map[e.key.toLowerCase()], false);
         });
     }
@@ -107,7 +184,7 @@ export class Toolbar {
     _select(name, sticky = false) {
         this.state.activeTool = name;
         this.state.toolSticky = sticky;
-        const labels = { select: 'Select', rectangle: 'Rektangel', ellipse: 'Ellips', line: 'Linje', bezier: 'Bezier', text: 'Text' };
+        const labels = { select: 'Select', rectangle: 'Rektangel', roundrect: 'Rundrekt.', ellipse: 'Ellips', line: 'Linje', bezier: 'Bezier', text: 'Text' };
         this.buttons.forEach(btn => {
             const isActive = btn.dataset.tool === name;
             btn.classList.toggle('active', isActive);

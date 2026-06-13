@@ -24,7 +24,9 @@ export class AppState {
         this.activeFontStyle = 0;
         this.editingTextId   = null; // id of TextShape currently open in overlay
 
-        this.activeStrokeWidth = 2;
+        this.activeStrokeWidth      = 2;
+        this.activeStrokeDash       = 0;
+        this.activeStrokePatternIdx = 3;
 
         this.showGrid = false;
         this.snapToGrid = false;
