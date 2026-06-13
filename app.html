@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MacDraw II Clone</title>
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Geneva, Chicago, Arial, sans-serif;
+            background: #c0c0c0;
+            overflow: hidden;
+        }
+
+        #app {
+            display: grid;
+            grid-template-columns: 72px 1fr;
+            grid-template-rows: 42px 1fr 24px;
+            height: 100vh;
+        }
+
+        .menu-bar {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            padding: 0 12px;
+            background: white;
+            border-bottom: 2px solid black;
+            font-size: 14px;
+            user-select: none;
+        }
+
+        .menu-title { font-weight: bold; }
+
+        /* ── Dropdown menu system ── */
+        .menu-wrap { position: relative; }
+
+        .menu-head {
+            padding: 2px 8px;
+            cursor: default;
+        }
+        .menu-head:hover, .menu-head.open {
+            background: black;
+            color: white;
+        }
+        .menu-head-dimmed {
+            padding: 2px 8px;
+            color: #aaa;
+            cursor: default;
+        }
+
+        .menu-drop {
+            display: none;
+            position: absolute;
+            top: calc(100% + 2px);
+            left: 0;
+            background: white;
+            border: 1px solid black;
+            box-shadow: 2px 2px 0 rgba(0,0,0,0.35);
+            min-width: 210px;
+            z-index: 1000;
+            padding: 3px 0;
+        }
+        .menu-drop.open { display: block; }
+
+        .menu-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 2px 14px 2px 18px;
+            cursor: default;
+            font-size: 13px;
+            white-space: nowrap;
+            gap: 20px;
+        }
+        .menu-row:hover:not(.disabled) { background: black; color: white; }
+        .menu-row.disabled { color: #aaa; }
+
+        .menu-kbd {
+            font-family: inherit;
+            font-size: 12px;
+            opacity: 0.65;
+        }
+        .menu-row:hover:not(.disabled) .menu-kbd { opacity: 0.9; }
+
+        .menu-sep {
+            border: none;
+            border-top: 1px solid #ddd;
+            margin: 3px 0;
+        }
+
+        .toolbox {
+            background: #e5e5e5;
+            border-right: 2px solid black;
+            padding: 6px 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            overflow-y: auto;
+        }
+
+        .tool-button {
+            width: 48px;
+            height: 48px;
+            border: 2px solid black;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .tool-button.active { background: black; color: white; }
+
+        .tool-divider {
+            width: 48px;
+            border: none;
+            border-top: 2px solid black;
+            margin: 2px 0;
+        }
+
+        .pattern-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2px;
+        }
+
+        .pattern-swatch {
+            width: 22px;
+            height: 22px;
+            cursor: pointer;
+            display: block;
+            image-rendering: pixelated;
+        }
+
+        .pattern-swatch.active { outline: 2px solid #0055ff; outline-offset: 1px; }
+
+        .stroke-swatch {
+            width: 48px; height: 16px;
+            border: 1px solid black;
+            background: white;
+            cursor: pointer;
+            display: block;
+            image-rendering: pixelated;
+        }
+        .stroke-swatch.active { outline: 2px solid #0055ff; outline-offset: 1px; }
+        #strokeGrid { display: flex; flex-direction: column; gap: 3px; }
+
+        /* ── Editor layout ── */
+        .editor-area {
+            overflow: auto;
+            background: #808080;
+            padding: 32px;
+        }
+
+        /* Grid wrapper: corner | h-ruler / v-ruler | document */
+        .doc-wrap {
+            display: grid;
+            grid-template-columns: 20px 1200px;
+            grid-template-rows: 20px 900px;
+            width: 1220px;
+            margin: 0 auto;
+        }
+
+        .ruler-corner {
+            background: #c8c8c8;
+            border-right: 1px solid #888;
+            border-bottom: 1px solid #888;
+        }
+
+        #rulerH {
+            display: block;
+            width: 1200px !important;
+            height: 20px !important;
+            border-bottom: 1px solid #888;
+            image-rendering: pixelated;
+        }
+
+        #rulerV {
+            display: block;
+            width: 20px !important;
+            height: 900px !important;
+            border-right: 1px solid #888;
+            image-rendering: pixelated;
+        }
+
+        .document {
+            position: relative;
+            width: 1200px;
+            height: 900px;
+            background: white;
+            box-shadow: 2px 2px 0 2px black;
+        }
+
+        #drawingCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated;
+        }
+
+        /* ── Status bar ── */
+        .status-bar {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            background: white;
+            border-top: 2px solid black;
+            font-size: 12px;
+            gap: 20px;
+        }
+
+        .status-bar .hint { margin-left: auto; color: #888; font-size: 11px; }
+
+        .grid-controls { display: flex; align-items: center; gap: 8px; }
+        .grid-controls label { display: flex; align-items: center; gap: 3px; cursor: pointer; }
+        .grid-controls select { font: inherit; font-size: 11px; border: 1px solid #888; background: white; padding: 0 2px; height: 18px; cursor: pointer; }
+        .grid-controls .sep { color: #bbb; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div class="menu-bar">
+        <div class="menu-title">&#8984;</div>
+        <!-- menus injected by MenuSystem -->
+    </div>
+
+    <aside class="toolbox">
+        <button class="tool-button active" data-tool="select"    title="Markera (S)">⌖</button>
+        <button class="tool-button"        data-tool="rectangle" title="Rektangel (R)">▭</button>
+        <button class="tool-button"        data-tool="ellipse"   title="Ellips (E)">◯</button>
+        <button class="tool-button"        data-tool="line"      title="Linje (L)">／</button>
+        <button class="tool-button"        data-tool="bezier"    title="Bézier (B)">✒</button>
+        <hr class="tool-divider" />
+        <div class="pattern-grid" id="patternGrid"></div>
+        <hr class="tool-divider" />
+        <div id="strokeGrid"></div>
+    </aside>
+
+    <main class="editor-area">
+        <div class="doc-wrap">
+            <div class="ruler-corner"></div>
+            <canvas id="rulerH" width="1200" height="20"></canvas>
+            <canvas id="rulerV" width="20"   height="900"></canvas>
+            <div class="document">
+                <canvas id="drawingCanvas" width="1200" height="900"></canvas>
+            </div>
+        </div>
+    </main>
+
+    <footer class="status-bar">
+        <span id="statusTool">Verktyg: Select</span>
+        <span id="statusPos"></span>
+        <span id="statusSize"></span>
+        <span class="grid-controls">
+            <label><input type="checkbox" id="cbGrid"> Grid</label>
+            <label><input type="checkbox" id="cbSnap"> Snap</label>
+            <select id="selGridSize" title="Grid size"></select>
+            <span class="sep">|</span>
+            <select id="selUnit" title="Ruler unit">
+                <option value="px">px</option>
+                <option value="mm">mm</option>
+            </select>
+        </span>
+        <span class="hint">S/R/E/L/B · ⌘Z/⌘⇧Z · ⌘C/⌘V/⌘D · Del · ⌘]/⌘[ layer · ⌘L lock</span>
+    </footer>
+</div>
+
+<input type="file" id="importFile" accept=".pict,.pic,.drw,.bin" style="display:none">
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

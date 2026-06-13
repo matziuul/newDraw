@@ -1,0 +1,36 @@
+export const PX_PER_MM = 96 / 25.4;
+
+export class AppState {
+    constructor() {
+        this.activeTool = 'select';
+        this.shapes = [];
+        this.currentDraft = null;
+        this.selectedId = null;
+        this.activePatternIdx = 0;
+        this.quickDraw = true;
+        this.clipboard = null;
+        this.dupOffset = { x: 10, y: 10 };
+        this.lastDupId = null;
+        this.lastDupSrcPos = null;
+        this.hoveredBezierHandle = null;
+        this.dragBezierHandle = null;
+        this.selectedIds = [];   // multi-selection (non-empty only when >1 shapes selected)
+        this.rubberBand  = null; // { x, y, w, h } while rubber-band drag is active
+
+        this.activeStrokeWidth = 2;
+
+        this.showGrid = false;
+        this.snapToGrid = false;
+        this.gridSizePx = 10;
+        this.gridSizeMm = 5;
+        this.rulerUnit = 'px';
+    }
+
+    get selectedShape() {
+        return this.shapes.find(s => s.id === this.selectedId) ?? null;
+    }
+
+    get gridStep() {
+        return this.rulerUnit === 'mm' ? this.gridSizeMm * PX_PER_MM : this.gridSizePx;
+    }
+}
