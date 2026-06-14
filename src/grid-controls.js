@@ -7,6 +7,13 @@ export class GridControls {
         this.renderer = renderer;
         this.ruler = ruler;
 
+        // Browser restores form control states across reloads; read DOM → state
+        // so both sides agree before the first render.
+        state.showGrid   = document.getElementById('cbGrid').checked;
+        state.snapToGrid = document.getElementById('cbSnap').checked;
+        const unitVal = document.getElementById('selUnit').value;
+        if (unitVal) state.rulerUnit = unitVal;
+
         this._syncGridSizeSelect();
         this._attachEvents();
     }

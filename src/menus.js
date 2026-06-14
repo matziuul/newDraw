@@ -4,8 +4,14 @@ import { printDrawing } from './print.js';
 
 const MENUS = [
     { id: 'file', label: 'File', items: [
-        { label: 'Open…',  kbd: '⌘O', action: 'open'  },
-        { label: 'Print…', kbd: '⌘P', action: 'print' },
+        { label: 'New',          kbd: '⌘N', action: 'new'         },
+        { label: 'Open…',        kbd: '⌘O', action: 'open'        },
+        '-',
+        { label: 'Import PICT…',            action: 'importPict'  },
+        '-',
+        { label: 'Save…',        kbd: '⌘S', action: 'save'        },
+        '-',
+        { label: 'Print…',       kbd: '⌘P', action: 'print'       },
     ]},
     { id: 'edit', label: 'Edit', items: [
         { label: 'Undo',      kbd: '⌘Z',        action: 'undo'      },
@@ -42,12 +48,14 @@ const MENUS = [
 ];
 
 export class MenuSystem {
-    constructor({ state, history, renderer, canvas, importInput, toolController }) {
+    constructor({ state, history, renderer, canvas, importInput, docInput, saveDoc, toolController }) {
         this.state    = state;
         this.history  = history;
         this.renderer = renderer;
         this.canvas   = canvas;
         this.importInput = importInput;
+        this.docInput    = docInput;
+        this.saveDoc     = saveDoc;
         this.tc = toolController;
 
         this._open = null;
@@ -239,8 +247,14 @@ export class MenuSystem {
             const cmd = e.metaKey || e.ctrlKey;
             if (!cmd) return;
 
+            if (e.key === 'n') {
+                e.preventDefault(); this._execute('new'); return;
+            }
             if (e.key === 'o') {
                 e.preventDefault(); this._execute('open'); return;
+            }
+            if (e.key === 's' && !e.shiftKey) {
+                e.preventDefault(); this._execute('save'); return;
             }
             if (e.key === 'g' && !e.shiftKey) {
                 e.preventDefault(); this._execute('group'); return;
@@ -290,8 +304,19 @@ export class MenuSystem {
         switch (action) {
 
             // File
-            case 'open':  this.importInput.click(); return;
-            case 'print': printDrawing(state.shapes, this.canvas.width, this.canvas.height); return;
+            case 'new': {
+                if (state.shapes.length && !confirm('Starta nytt dokument? Osparade ändringar går förlorade.')) return;
+                state.shapes = [];
+                state.selectedId = null;
+                state.selectedIds = [];
+                this.history.reset();
+                this.tc.syncUI();
+                return;
+            }
+            case 'open':       this.docInput.click(); return;
+            case 'importPict': this.importInput.click(); return;
+            case 'save':       this.saveDoc(); return;
+            case 'print':      printDrawing(state.shapes, this.canvas.width, this.canvas.height); return;
 
             // Edit (mirrors logic in ToolController._onKey; syncUI() updates status + toolbar)
             case 'undo': if (history.undo()) this.tc.syncUI(); return;
@@ -478,11 +503,11 @@ export class MenuSystem {
 // ── Shape transform helpers ───────────────────────────────────────────────────
 
 function applyTransform(shape, op) {
-    const b  = shape.getBounds();
+    const b  = shape.getSelectionBounds?.() ?? shape.getBounds();
     const cx = b.x + b.width  / 2;
     const cy = b.y + b.height / 2;
     const fn = _makeFn(op, cx, cy);
-    _applyFn(shape, fn);
+    _applyFn(shape, fn, op);
 }
 
 function _makeFn(op, cx, cy) {
@@ -492,7 +517,7 @@ function _makeFn(op, cx, cy) {
     /* rotate90CCW */        return (x, y) => ({ x: cx - (y - cy), y: cy + (x - cx) });
 }
 
-function _applyFn(shape, fn) {
+function _applyFn(shape, fn, op = null) {
     if (shape.type === 'line') {
         const p1 = fn(shape.x1, shape.y1), p2 = fn(shape.x2, shape.y2);
         shape.x1 = p1.x; shape.y1 = p1.y; shape.x2 = p2.x; shape.y2 = p2.y;
@@ -505,11 +530,39 @@ function _applyFn(shape, fn) {
 
     } else if (shape.type === 'group') {
         // All children transform around the group's center (fn already has cx/cy baked in)
-        for (const child of shape.children) _applyFn(child, fn);
+        for (const child of shape.children) _applyFn(child, fn, op);
 
     } else if (shape.type === 'text') {
         const p = fn(shape.x, shape.y);
         shape.x = p.x; shape.y = p.y;
+
+    } else if (shape.type === 'arc') {
+        // Transform the visible quadrant's bounding box, then remap quadrant and recompute
+        // the full ellipse. The quadrant mapping per operation (verified by tracing each arc
+        // endpoint through the transform formula):
+        //   flipH:       Q0↔Q3, Q1↔Q2  → 3-q
+        //   flipV:       Q0↔Q1, Q2↔Q3  → q^1
+        //   rotate90CW:  Q0→Q3→Q2→Q1→  → (q+3)%4
+        //   rotate90CCW: Q0→Q1→Q2→Q3→  → (q+1)%4
+        const sb = shape.getSelectionBounds();
+        const corners = [
+            fn(sb.x,             sb.y),
+            fn(sb.x + sb.width,  sb.y),
+            fn(sb.x,             sb.y + sb.height),
+            fn(sb.x + sb.width,  sb.y + sb.height),
+        ];
+        const xs = corners.map(c => c.x), ys = corners.map(c => c.y);
+        const vx = Math.min(...xs), vy = Math.min(...ys);
+        const vw = Math.max(...xs) - vx, vh = Math.max(...ys) - vy;
+        const q = shape.quadrant;
+        if (op === 'flipH')           shape.quadrant = 3 - q;
+        else if (op === 'flipV')      shape.quadrant = q ^ 1;
+        else if (op === 'rotate90CW') shape.quadrant = (q + 3) % 4;
+        else                          shape.quadrant = (q + 1) % 4; // rotate90CCW
+        const nq = shape.quadrant;
+        shape.x = (nq === 0 || nq === 1) ? vx - vw : vx;
+        shape.y = (nq === 1 || nq === 2) ? vy - vh : vy;
+        shape.width = 2 * vw; shape.height = 2 * vh;
 
     } else {
         // rect / ellipse: transform corners → new axis-aligned bounding box

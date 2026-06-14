@@ -27,4 +27,9 @@ export class History {
         this.state.selectedId = null;
         return true;
     }
+
+    reset() {
+        this.undoStack = [];
+        this.redoStack = [];
+    }
 }

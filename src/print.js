@@ -1,5 +1,5 @@
 import { QD_PATTERNS, buildPattern } from './patterns.js';
-import { normalize, STROKE_DASHES } from './shapes.js';
+import { normalize, STROKE_DASHES, ARROW_MODES } from './shapes.js';
 
 function buildFillsImage(shapes, width, height) {
     const canvas = document.createElement('canvas');
@@ -30,6 +30,19 @@ function buildFillsImage(shapes, width, height) {
             ctx.beginPath();
             ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
             ctx.fill();
+        } else if (shape.type === 'arc') {
+            const { x, y, width: w, height: h } = normalize(shape.x, shape.y, shape.width, shape.height);
+            const cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
+            const q = shape.quadrant ?? 1;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            switch (q) {
+                case 0: ctx.ellipse(cx,cy,rx,ry,0,-Math.PI/2,  0,         false); break;
+                case 1: ctx.ellipse(cx,cy,rx,ry,0, 0,          Math.PI/2, false); break;
+                case 2: ctx.ellipse(cx,cy,rx,ry,0, Math.PI/2,  Math.PI,   false); break;
+                case 3: ctx.ellipse(cx,cy,rx,ry,0, 3*Math.PI/2,Math.PI,   true ); break;
+            }
+            ctx.closePath(); ctx.fill();
         }
     }
 
@@ -53,15 +66,26 @@ function patternTileDataUrl(rows) {
     return c.toDataURL('image/png');
 }
 
-function buildStrokePatternDefs(shapes) {
-    const indices = [...new Set(shapes.map(s => s.strokePatternIdx ?? 3))]
+function buildDefs(shapes) {
+    const parts = [];
+
+    // Stroke pattern tiles
+    const patIndices = [...new Set(shapes.map(s => s.strokePatternIdx ?? 3))]
         .filter(i => i !== 0 && i !== 3 && QD_PATTERNS[i]?.rows);
-    if (!indices.length) return '';
-    const defs = indices.map(i => {
+    for (const i of patIndices) {
         const url = patternTileDataUrl(QD_PATTERNS[i].rows);
-        return `<pattern id="sp${i}" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse"><image href="${url}" width="8" height="8"/></pattern>`;
-    }).join('\n    ');
-    return `<defs>\n    ${defs}\n  </defs>`;
+        parts.push(`<pattern id="sp${i}" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse"><image href="${url}" width="8" height="8"/></pattern>`);
+    }
+
+    // Arrow markers (only if any shape uses them)
+    const needsArrow = shapes.some(s => s.arrowMode && s.arrowMode !== 0);
+    if (needsArrow) {
+        parts.push(`<marker id="arr-e" markerWidth="4" markerHeight="3" refX="4" refY="1.5" orient="auto" markerUnits="strokeWidth"><polygon points="0 0, 4 1.5, 0 3" fill="black"/></marker>`);
+        parts.push(`<marker id="arr-s" markerWidth="4" markerHeight="3" refX="0" refY="1.5" orient="auto" markerUnits="strokeWidth"><polygon points="4 0, 0 1.5, 4 3" fill="black"/></marker>`);
+    }
+
+    if (!parts.length) return '';
+    return `<defs>\n    ${parts.join('\n    ')}\n  </defs>`;
 }
 
 function strokeAttr(shape) {
@@ -74,6 +98,15 @@ function strokeAttr(shape) {
 function dashAttr(shape) {
     const dash = STROKE_DASHES[shape.strokeDash ?? 0]?.dash;
     return dash?.length ? ` stroke-dasharray="${dash.join(' ')}"` : '';
+}
+
+function arrowAttr(shape) {
+    const mode = ARROW_MODES[shape.arrowMode ?? 0];
+    if (!mode || (!mode.start && !mode.end)) return '';
+    let attr = '';
+    if (mode.start) attr += ' marker-start="url(#arr-s)"';
+    if (mode.end)   attr += ' marker-end="url(#arr-e)"';
+    return attr;
 }
 
 function shapeToSvg(shape) {
@@ -93,8 +126,20 @@ function shapeToSvg(shape) {
         const cx = x + width / 2, cy = y + height / 2;
         return `<ellipse cx="${cx}" cy="${cy}" rx="${width / 2}" ry="${height / 2}" fill="none" ${sw}/>`;
     }
+    if (shape.type === 'arc') {
+        const { x, y, width: w, height: h } = normalize(shape.x, shape.y, shape.width, shape.height);
+        const cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
+        let d;
+        switch (shape.quadrant ?? 1) {
+            case 0: d=`M ${cx} ${cy-ry} A ${rx} ${ry} 0 0 1 ${cx+rx} ${cy}`; break; // top-right CW
+            case 1: d=`M ${cx+rx} ${cy} A ${rx} ${ry} 0 0 1 ${cx} ${cy+ry}`; break; // bottom-right CW
+            case 2: d=`M ${cx} ${cy+ry} A ${rx} ${ry} 0 0 1 ${cx-rx} ${cy}`; break; // bottom-left CW
+            case 3: d=`M ${cx} ${cy-ry} A ${rx} ${ry} 0 0 0 ${cx-rx} ${cy}`; break; // top-left CCW
+        }
+        return `<path d="${d}" fill="none" ${sw}/>`;
+    }
     if (shape.type === 'line') {
-        return `<line x1="${shape.x1}" y1="${shape.y1}" x2="${shape.x2}" y2="${shape.y2}" ${strokeAttr(shape)} stroke-width="${shape.strokeWidth}"${dashAttr(shape)} stroke-linecap="round"/>`;
+        return `<line x1="${shape.x1}" y1="${shape.y1}" x2="${shape.x2}" y2="${shape.y2}" ${strokeAttr(shape)} stroke-width="${shape.strokeWidth}"${dashAttr(shape)}${arrowAttr(shape)} stroke-linecap="round"/>`;
     }
     if (shape.type === 'bezier' && shape.points.length >= 2) {
         const pts = shape.points;
@@ -102,7 +147,7 @@ function shapeToSvg(shape) {
         for (let i = 1; i < pts.length; i++) {
             d += ` C ${pts[i-1].c2x} ${pts[i-1].c2y} ${pts[i].c1x} ${pts[i].c1y} ${pts[i].x} ${pts[i].y}`;
         }
-        return `<path d="${d}" fill="none" ${strokeAttr(shape)} stroke-width="${shape.strokeWidth}"${dashAttr(shape)} stroke-linecap="round" stroke-linejoin="round"/>`;
+        return `<path d="${d}" fill="none" ${strokeAttr(shape)} stroke-width="${shape.strokeWidth}"${dashAttr(shape)}${arrowAttr(shape)} stroke-linecap="round" stroke-linejoin="round"/>`;
     }
     return '';
 }
@@ -112,7 +157,7 @@ export function buildSvg(shapes, width, height) {
     const fillsLayer = hasFills
         ? `<image href="${buildFillsImage(shapes, width, height)}" width="${width}" height="${height}"/>`
         : '';
-    const defs = buildStrokePatternDefs(shapes);
+    const defs = buildDefs(shapes);
     const body = shapes.map(shapeToSvg).join('\n  ');
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">\n  ${defs}\n  ${fillsLayer}\n  ${body}\n</svg>`;
 }

@@ -1,5 +1,28 @@
 import { fontCss } from './text-defs.js';
 
+export const ARROW_MODES = [
+    { name: 'Ingen', start: false, end: false },
+    { name: 'Slut',  start: false, end: true  },
+    { name: 'Start', start: true,  end: false },
+    { name: 'Båda',  start: true,  end: true  },
+];
+
+function _arrowHead(ctx, tipX, tipY, angle, sw) {
+    const L = Math.max(10, sw * 3);
+    const W = Math.max(4,  sw * 1.5);
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.translate(tipX, tipY);
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-L, -W);
+    ctx.lineTo(-L,  W);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+
 export const STROKE_DASHES = [
     { name: 'Heldragen',   dash: [] },
     { name: 'Streckad',    dash: [10, 5] },
@@ -19,6 +42,7 @@ export const HS = 6;
 
 let _uid = 0;
 export function nextUid() { return ++_uid; }
+export function seedUid(n) { if (n > _uid) _uid = n; }
 
 export function normalize(x, y, w, h) {
     return { x: w < 0 ? x + w : x, y: h < 0 ? y + h : y, width: Math.abs(w), height: Math.abs(h) };
@@ -177,7 +201,7 @@ export class LineShape {
     constructor(x1, y1, x2, y2) {
         this.id = nextUid(); this.type = 'line';
         this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2;
-        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.arrowMode = 0; this.locked = false;
     }
 
     getBounds() {
@@ -197,7 +221,7 @@ export class LineShape {
 
     clone() {
         const s = new LineShape(this.x1, this.y1, this.x2, this.y2);
-        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
+        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.arrowMode = this.arrowMode; s.locked = this.locked;
         return s;
     }
 
@@ -208,10 +232,29 @@ export class LineShape {
         const y2 = qd ? snap(this.y2) + 0.5 : this.y2;
         const strokePat = patterns[this.strokePatternIdx ?? 3];
         if (strokePat === null) return;
+
+        const mode = ARROW_MODES[this.arrowMode ?? 0];
+        const sw   = this.strokeWidth;
+        const arrowL = Math.max(10, sw * 3);
+        const len    = Math.hypot(x2 - x1, y2 - y1);
+        const angle  = Math.atan2(y2 - y1, x2 - x1);
+
+        // Shorten line so stroke doesn't overdraw the arrow head
+        let lx1 = x1, ly1 = y1, lx2 = x2, ly2 = y2;
+        if (len > 0) {
+            const ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+            const s  = Math.min(arrowL, len * 0.45);
+            if (mode.end)   { lx2 = x2 - ux * s; ly2 = y2 - uy * s; }
+            if (mode.start) { lx1 = x1 + ux * s; ly1 = y1 + uy * s; }
+        }
+
         ctx.save();
-        ctx.strokeStyle = strokePat; ctx.lineWidth = this.strokeWidth;
+        ctx.strokeStyle = strokePat; ctx.fillStyle = strokePat;
+        ctx.lineWidth = sw;
         ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
-        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(lx1, ly1); ctx.lineTo(lx2, ly2); ctx.stroke();
+        if (mode.end)   _arrowHead(ctx, x2, y2, angle,             sw);
+        if (mode.start) _arrowHead(ctx, x1, y1, angle + Math.PI,   sw);
         ctx.restore();
     }
 }
@@ -233,7 +276,7 @@ export class BezierShape {
     constructor(points = []) {
         this.id = nextUid(); this.type = 'bezier';
         this.points = points;
-        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.arrowMode = 0; this.locked = false;
     }
 
     _makePath() {
@@ -264,8 +307,21 @@ export class BezierShape {
 
     clone() {
         const b = new BezierShape(this.points.map(p => ({ ...p })));
-        b.id = this.id; b.fillIdx = this.fillIdx; b.strokeWidth = this.strokeWidth; b.strokeDash = this.strokeDash; b.strokePatternIdx = this.strokePatternIdx; b.locked = this.locked;
+        b.id = this.id; b.fillIdx = this.fillIdx; b.strokeWidth = this.strokeWidth; b.strokeDash = this.strokeDash; b.strokePatternIdx = this.strokePatternIdx; b.arrowMode = this.arrowMode; b.locked = this.locked;
         return b;
+    }
+
+    _endAngle() {
+        const pts = this.points, n = pts.length - 1;
+        const p = pts[n];
+        if (p.c1x !== p.x || p.c1y !== p.y) return Math.atan2(p.y - p.c1y, p.x - p.c1x);
+        return Math.atan2(p.y - pts[n - 1].y, p.x - pts[n - 1].x);
+    }
+
+    _startAngle() {
+        const pts = this.points, p = pts[0];
+        if (p.c2x !== p.x || p.c2y !== p.y) return Math.atan2(p.y - p.c2y, p.x - p.c2x);
+        return Math.atan2(p.y - pts[1].y, p.x - pts[1].x);
     }
 
     draw(ctx, patterns, _qd) {
@@ -278,7 +334,15 @@ export class BezierShape {
         const path = this._makePath();
         const pat = patterns[this.fillIdx];
         if (pat) { ctx.fillStyle = pat; ctx.fill(path); }
-        if (strokePat !== null) { ctx.strokeStyle = strokePat; ctx.stroke(path); }
+        if (strokePat !== null) {
+            ctx.strokeStyle = strokePat; ctx.fillStyle = strokePat;
+            ctx.stroke(path);
+            const mode = ARROW_MODES[this.arrowMode ?? 0];
+            const sw   = this.strokeWidth;
+            const pts  = this.points;
+            if (mode.end)   _arrowHead(ctx, pts[pts.length-1].x, pts[pts.length-1].y, this._endAngle(),   sw);
+            if (mode.start) _arrowHead(ctx, pts[0].x,            pts[0].y,            this._startAngle(), sw);
+        }
         ctx.restore();
     }
 }
@@ -329,6 +393,91 @@ export class RoundRectShape {
         if (pat) { ctx.fillStyle = pat; ctx.fill(path); }
         const strokePat = patterns[this.strokePatternIdx ?? 3];
         if (strokePat !== null) { ctx.strokeStyle = strokePat; ctx.stroke(path); }
+        ctx.restore();
+    }
+}
+
+function _arcEllipse(path, cx, cy, rx, ry, quadrant) {
+    switch (quadrant) {
+        case 0: path.ellipse(cx, cy, rx, ry, 0, -Math.PI / 2,      0,           false); break; // top → right
+        case 1: path.ellipse(cx, cy, rx, ry, 0,  0,                Math.PI / 2, false); break; // right → bottom
+        case 2: path.ellipse(cx, cy, rx, ry, 0,  Math.PI / 2,      Math.PI,     false); break; // bottom → left
+        case 3: path.ellipse(cx, cy, rx, ry, 0,  3 * Math.PI / 2,  Math.PI,     true ); break; // top → left (CCW)
+    }
+}
+
+// quadrant: 0=top-right, 1=bottom-right, 2=bottom-left, 3=top-left
+// (x,y,width,height) is the bounding box of the inscribed full ellipse.
+// The quadrant picks which 90° sector to show; the arc fills the corner
+// that faces the same direction as the quadrant.
+// rx = width/2, ry = height/2  (standard ellipse half-radii)
+export class ArcShape {
+    constructor(x, y, w, h) {
+        this.id = nextUid(); this.type = 'arc';
+        this.x = x; this.y = y; this.width = w; this.height = h;
+        this.quadrant = 1; // default: bottom-right
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
+    }
+
+    getBounds() { return normalize(this.x, this.y, this.width, this.height); }
+
+    // Returns the bounding box of the visible arc quadrant (not the full ellipse).
+    getSelectionBounds() {
+        const { x, y, width: w, height: h } = normalize(this.x, this.y, this.width, this.height);
+        const rx = w / 2, ry = h / 2, cx = x + rx, cy = y + ry;
+        switch (this.quadrant) {
+            case 0: return { x: cx, y,       width: rx, height: ry };
+            case 1: return { x: cx, y: cy,   width: rx, height: ry };
+            case 2: return { x,    y: cy,    width: rx, height: ry };
+            case 3: return { x,    y,        width: rx, height: ry };
+            default: return { x, y, width: w, height: h };
+        }
+    }
+
+    // Closed wedge path (for fill and hit-test)
+    _makeFillPath(x, y, w, h) {
+        const cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
+        const p = new Path2D();
+        p.moveTo(cx, cy);
+        _arcEllipse(p, cx, cy, rx, ry, this.quadrant);
+        p.closePath();
+        return p;
+    }
+
+    // Open arc path (for stroke only — no radii lines)
+    _makeStrokePath(x, y, w, h) {
+        const cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
+        const p = new Path2D();
+        _arcEllipse(p, cx, cy, rx, ry, this.quadrant);
+        return p;
+    }
+
+    hitTest(px, py) {
+        const { x, y, width, height } = this.getBounds();
+        if (width === 0 || height === 0) return false;
+        return getScratchCtx().isPointInPath(this._makeFillPath(x, y, width, height), px, py);
+    }
+
+    clone() {
+        const s = new ArcShape(this.x, this.y, this.width, this.height);
+        s.id = this.id; s.quadrant = this.quadrant; s.fillIdx = this.fillIdx;
+        s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash;
+        s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
+        return s;
+    }
+
+    draw(ctx, patterns, qd) {
+        const { x, y, width, height } = this.getBounds();
+        const px = qd ? snap(x) : x, py = qd ? snap(y) : y;
+        const pw = qd ? snap(width) : width, ph = qd ? snap(height) : height;
+        if (pw === 0 || ph === 0) return;
+        ctx.save();
+        ctx.lineWidth = this.strokeWidth;
+        ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
+        const pat = patterns[this.fillIdx];
+        if (pat) { ctx.fillStyle = pat; ctx.fill(this._makeFillPath(px, py, pw, ph)); }
+        const strokePat = patterns[this.strokePatternIdx ?? 3];
+        if (strokePat !== null) { ctx.strokeStyle = strokePat; ctx.stroke(this._makeStrokePath(px, py, pw, ph)); }
         ctx.restore();
     }
 }

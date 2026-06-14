@@ -1,6 +1,6 @@
 import {
     hitTestHandle, hitTestBezierHandle, HANDLE_DEFS,
-    RectangleShape, EllipseShape, LineShape, BezierShape, TextShape, RoundRectShape,
+    RectangleShape, EllipseShape, LineShape, BezierShape, TextShape, RoundRectShape, ArcShape,
     nextUid, offsetShape, applyMoveFromOrigin,
 } from './shapes.js';
 import { fontCss } from './text-defs.js';
@@ -92,6 +92,8 @@ export class ToolController {
                 this.state.activeStrokeWidth      = sel.strokeWidth;
                 this.state.activeStrokeDash       = sel.strokeDash ?? 0;
                 this.state.activeStrokePatternIdx = sel.strokePatternIdx ?? 3;
+                if (sel.type === 'line' || sel.type === 'bezier')
+                    this.state.activeArrowMode = sel.arrowMode ?? 0;
             }
             if (sel.type === 'text') {
                 this.state.activeFont      = sel.fontFamily;
@@ -106,6 +108,7 @@ export class ToolController {
             this.elSize.textContent = '';
         }
         this.toolbar?.sync();
+        this.inspector?.sync();
         this.renderer.render();
     }
 
@@ -127,6 +130,9 @@ export class ToolController {
     }
 
     _fmtUnit() { return this.state.rulerUnit === 'mm' ? ' mm' : ''; }
+
+    _fmtX(px) { return this._fmt(px - (this.state.rulerOriginX || 0)); }
+    _fmtY(py) { return this._fmt(py - (this.state.rulerOriginY || 0)); }
 
     _onKey(e) {
         // Don't intercept keys while text overlay is focused
@@ -273,7 +279,7 @@ export class ToolController {
 
         // Resize handle (single selected non-bezier, non-group, non-text, unlocked)
         if (sel && sel.type !== 'bezier' && sel.type !== 'group' && sel.type !== 'text' && !sel.locked) {
-            const hid = hitTestHandle(pos.x, pos.y, sel.getBounds());
+            const hid = hitTestHandle(pos.x, pos.y, sel.getSelectionBounds?.() ?? sel.getBounds());
             if (hid) {
                 this.preOpSnapshot = this.history.savePreOp();
                 this.originShape = sel.clone();
@@ -351,7 +357,7 @@ export class ToolController {
                 pt.c1x = pt.x - dx; pt.c1y = pt.y - dy;
                 d.mouseX = pos.x; d.mouseY = pos.y;
             }
-            this.elPos.textContent = `x: ${this._fmt(pos.x)}  y: ${this._fmt(pos.y)}${this._fmtUnit()}`;
+            this.elPos.textContent = `x: ${this._fmtX(pos.x)}  y: ${this._fmtY(pos.y)}${this._fmtUnit()}`;
             this.ruler.render();
             this.renderer.render();
             return;
@@ -361,7 +367,7 @@ export class ToolController {
             const d = this.state.currentDraft;
             if (d?.type === 'bezier') { d.mouseX = pos.x; d.mouseY = pos.y; }
             this._updateCursor(rawPos);
-            this.elPos.textContent = `x: ${this._fmt(rawPos.x)}  y: ${this._fmt(rawPos.y)}${this._fmtUnit()}`;
+            this.elPos.textContent = `x: ${this._fmtX(rawPos.x)}  y: ${this._fmtY(rawPos.y)}${this._fmtUnit()}`;
             this.ruler.render();
             this.renderer.render();
             return;
@@ -373,7 +379,17 @@ export class ToolController {
         if (this.dragMode === 'draw') {
             const d = this.state.currentDraft;
             if (d.type === 'line') { d.x2 = pos.x; d.y2 = pos.y; }
-            else { d.width = dx; d.height = dy; }
+            else if (d.type === 'arc') {
+                // Position the full ellipse so one arc endpoint lands exactly at the
+                // click and the other at the drag: cx=startX, cy=startY+dy, rx=|dx|, ry=|dy|.
+                const ax = Math.abs(dx), ay = Math.abs(dy);
+                d.x = this.startX - ax;
+                d.y = this.startY + dy - ay;  // cy - ry
+                d.width = 2 * ax; d.height = 2 * ay;
+                d.quadrant = dx >= 0 ? (dy >= 0 ? 0 : 1) : (dy >= 0 ? 3 : 2);
+            } else {
+                d.width = dx; d.height = dy;
+            }
 
         } else if (this.dragMode === 'move') {
             const shape = this.state.selectedShape, orig = this.originShape;
@@ -438,6 +454,21 @@ export class ToolController {
             return;
         }
 
+        // Arc resize: operate on visible quadrant bounds then expand back to full ellipse.
+        if (shape.type === 'arc') {
+            const ob = orig.getSelectionBounds();
+            let vx = ob.x, vy = ob.y, vw = ob.width, vh = ob.height;
+            if (h.includes('w')) { const nx = this._snapVal(ob.x + dx); vw = ob.width + ob.x - nx; vx = nx; }
+            if (h.includes('e')) { vw = this._snapVal(ob.x + ob.width + dx) - vx; }
+            if (h.includes('n')) { const ny = this._snapVal(ob.y + dy); vh = ob.height + ob.y - ny; vy = ny; }
+            if (h.includes('s')) { vh = this._snapVal(ob.y + ob.height + dy) - vy; }
+            const qd = shape.quadrant;
+            shape.x = (qd === 0 || qd === 1) ? vx - vw : vx;
+            shape.y = (qd === 1 || qd === 2) ? vy - vh : vy;
+            shape.width = 2 * vw; shape.height = 2 * vh;
+            return;
+        }
+
         shape.x = orig.x; shape.y = orig.y;
         shape.width = orig.width; shape.height = orig.height;
 
@@ -479,19 +510,22 @@ export class ToolController {
     _updateStatusWhileDragging(pos) {
         const d = this.state.currentDraft;
         const u = this._fmtUnit();
-        this.elPos.textContent = `x: ${this._fmt(pos.x)}  y: ${this._fmt(pos.y)}${u}`;
+        this.elPos.textContent = `x: ${this._fmtX(pos.x)}  y: ${this._fmtY(pos.y)}${u}`;
         if (d) {
             if (d.type === 'line')
                 this.elSize.textContent = `∆: ${this._fmt(Math.abs(d.x2-d.x1))} × ${this._fmt(Math.abs(d.y2-d.y1))}${u}`;
+            else if (d.type === 'arc')
+                this.elSize.textContent = `${this._fmt(Math.abs(d.width)/2)} × ${this._fmt(Math.abs(d.height)/2)}${u}`;
             else
                 this.elSize.textContent = `${this._fmt(Math.abs(d.width))} × ${this._fmt(Math.abs(d.height))}${u}`;
         } else {
             const sel = this.state.selectedShape;
             if (sel) {
-                const b = sel.getBounds();
+                const b = sel.getSelectionBounds?.() ?? sel.getBounds();
                 this.elSize.textContent = `${this._fmt(b.width)} × ${this._fmt(b.height)}${u}`;
             }
         }
+        this.inspector?.sync();
     }
 
     _updateCursor(pos) {
@@ -510,7 +544,7 @@ export class ToolController {
                     return;
                 }
             } else if (sel.type !== 'bezier' && sel.type !== 'group' && sel.type !== 'text' && !sel.locked) {
-                const hid = hitTestHandle(pos.x, pos.y, sel.getBounds());
+                const hid = hitTestHandle(pos.x, pos.y, sel.getSelectionBounds?.() ?? sel.getBounds());
                 if (hid) { this.canvas.style.cursor = HANDLE_DEFS.find(d => d.id === hid)?.cursor ?? 'default'; return; }
             }
             if (sel.hitTest(pos.x, pos.y)) { this.canvas.style.cursor = 'move'; return; }
@@ -546,12 +580,17 @@ export class ToolController {
                 else if (d.type === 'ellipse')   shape = new EllipseShape(d.x, d.y, d.width, d.height);
                 else if (d.type === 'line')      shape = new LineShape(d.x1, d.y1, d.x2, d.y2);
                 else if (d.type === 'roundrect') shape = new RoundRectShape(d.x, d.y, d.width, d.height);
+                else if (d.type === 'arc') {
+                    shape = new ArcShape(d.x, d.y, d.width, d.height);
+                    shape.quadrant = d.quadrant ?? 1;
+                }
 
                 if (shape) {
                     shape.fillIdx          = this.state.activePatternIdx;
                     shape.strokeWidth      = this.state.activeStrokeWidth;
                     shape.strokeDash       = this.state.activeStrokeDash;
                     shape.strokePatternIdx = this.state.activeStrokePatternIdx;
+                    if (shape.type === 'line') shape.arrowMode = this.state.activeArrowMode;
                     this.state.shapes.push(shape);
                     this.state.selectedId = shape.id;
                     this.history.commit(this.preOpSnapshot);
@@ -630,6 +669,7 @@ export class ToolController {
             shape.strokeWidth      = this.state.activeStrokeWidth;
             shape.strokeDash       = this.state.activeStrokeDash;
             shape.strokePatternIdx = this.state.activeStrokePatternIdx;
+            shape.arrowMode        = this.state.activeArrowMode;
             this.state.shapes.push(shape);
             this.state.selectedId = shape.id;
             this.history.commit(this.preOpSnapshot);

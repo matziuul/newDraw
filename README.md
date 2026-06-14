@@ -12,15 +12,17 @@ npx serve .
 
 ## Drawing tools
 
-The toolbar on the left contains six tools. **Single-click** a draw tool to use it once — the tool automatically returns to Select after you finish drawing the shape. **Double-click** a draw tool to lock it (a blue outline appears on the button) so it stays active for multiple shapes. Click another tool or press S to return to Select.
+The toolbar on the left contains eight tools. **Single-click** a draw tool to use it once — the tool automatically returns to Select after you finish drawing the shape. **Double-click** a draw tool to lock it (a blue outline appears on the button) so it stays active for multiple shapes. Click another tool or press S to return to Select.
 
 | Button | Tool | Key | Behavior |
 |---|---|---|---|
 | ⌖ | Select | S | Move, resize, click-select, rubber-band select |
 | ▭ | Rectangle | R | Drag to draw; auto-returns to Select unless locked |
+| ⬜ | Rounded Rect | O | Drag to draw a rectangle with rounded corners |
 | ◯ | Ellipse | E | Drag to draw; auto-returns to Select unless locked |
 | ／ | Line | L | Drag to draw; auto-returns to Select unless locked |
 | ✒ | Bézier | B | Click to place anchor points, drag to pull handles; press Enter or double-click canvas to finish; auto-returns to Select unless locked |
+| ⌓ | Arc | A | Drag to draw a quarter-ellipse arc; the click point becomes one arc endpoint, the release point becomes the other |
 | A | Text | T | Click to place a text box; double-click an existing text shape to edit it |
 
 ## Keyboard shortcuts
@@ -30,9 +32,11 @@ The toolbar on the left contains six tools. **Single-click** a draw tool to use 
 |---|---|
 | S | Select tool |
 | R | Rectangle tool |
+| O | Rounded Rect tool |
 | E | Ellipse tool |
 | L | Line tool |
 | B | Bézier tool |
+| A | Arc tool |
 | T | Text tool |
 
 ### Edit
@@ -70,7 +74,8 @@ The toolbar on the left contains six tools. **Single-click** a draw tool to use 
 ## Menus
 
 ### File
-- **Open…** (⌘O) — import a PICT or MacDraw II `.drw` file
+- **Save…** (⌘S) — save the current drawing as a `.mcd` file (JSON format)
+- **Open…** (⌘O) — open a previously saved `.mcd` file, or import a legacy PICT or MacDraw II `.drw` file
 - **Print…** (⌘P) — print the canvas
 
 ### Edit
@@ -100,13 +105,15 @@ Font, size, and style show checkmarks next to the current active value. Changes 
 ### Resize handles
 Selected non-group, non-text shapes show 8 white square handles at corners and edge midpoints. Locked shapes show grey handles and cannot be resized or moved. Group and text shapes show only a dashed selection outline (no resize handles).
 
-## Pattern fills and stroke widths
+## Pattern fills and stroke styles
 
 The toolbar panel shows:
 - **37 QuickDraw fill patterns** — including transparent (no fill), white, black, and 34 intermediate patterns. Click a swatch to set the fill for new shapes or the currently selected shape.
 - **6 stroke widths** — 1, 2, 3, 4, 6, 8 px. Click a swatch to set the stroke width.
+- **6 stroke dash styles** — solid, dashed, dotted, dash-dot, long dash, double-dot. Click a swatch to set the line style for new shapes or the currently selected shape.
+- **4 line arrow modes** (lines only) — no arrows, end arrow, start arrow, both ends.
 
-The active pattern and stroke width are reflected back when you select a shape.
+The active pattern, stroke width, dash style, and arrow mode are reflected back when you select a shape.
 
 ## Bézier curves
 
@@ -121,17 +128,31 @@ Click anywhere on the canvas to open a `contenteditable` overlay at that positio
 
 To edit existing text, double-click it with the Select tool, or click it with the Text tool.
 
-## File import
+## Inspector
 
-**File → Open…** accepts:
+The inspector panel on the right shows the **X**, **Y**, **W** (width), and **H** (height) of the selected shape in the current ruler unit (px or mm). Values can be edited directly — type a new number and press Enter or Tab to apply. Position fields (X, Y) are relative to the ruler origin.
+
+Resizing via the inspector keeps the shape's top-left corner fixed (equivalent to dragging the bottom-right handle).
+
+## File save and open
+
+**File → Save…** (⌘S) downloads the drawing as a `.mcd` file — a JSON document containing all shape data, canvas dimensions, and layer order. Reopen it with **File → Open…** to restore the drawing exactly.
+
+**File → Open…** (⌘O) also accepts legacy formats:
 - **PICT** (v1 and v2, with or without 512-byte QuickDraw header) — imports lines, rectangles, rounded rectangles, ovals, and polygons (rendered as line sequences); bitmaps and regions are skipped
 - **MacDraw II `.drw`** — imports lines, rectangles, rounded rectangles, and ovals; fill and pen patterns are approximated against the built-in palette
 
 ## Grid and rulers
 
-Horizontal and vertical pixel rulers run along the top and left edges. The status bar at the bottom shows the cursor position and the size of the selected shape. Units can be switched between pixels and millimetres via the View menu (or the grid controls panel).
+Horizontal and vertical pixel rulers run along the top and left edges. The status bar at the bottom shows the cursor position and the size of the selected shape. Units can be switched between pixels and millimetres via the grid controls panel.
 
 A grid can be toggled on/off and snap-to-grid enabled via the grid controls. Grid size is configurable in pixels or millimetres.
+
+### Ruler origin
+
+**Click and drag** the small grey square in the top-left corner where the two rulers meet to set a custom zero point anywhere on the canvas. While dragging, a blue dashed crosshair previews where the origin will land and the ruler markers follow live. On release, both rulers renumber so that "0" sits at the drop point, and all position readouts in the status bar become relative to that origin.
+
+**Double-click** the corner square to reset the origin back to (0, 0).
 
 ## Architecture
 
@@ -140,7 +161,7 @@ A grid can be toggled on/off and snap-to-grid enabled via the grid controls. Gri
 | `app.html` | Single-page app shell: canvas, toolbar, rulers, menus, CSS |
 | `src/main.js` | Wires all modules together; owns the file import event handler |
 | `src/state.js` | `AppState` — all mutable application state |
-| `src/shapes.js` | Shape classes: `RectangleShape`, `EllipseShape`, `LineShape`, `BezierShape`, `GroupShape`, `TextShape`; geometry helpers (`normalize`, `snap`, `offsetShape`, `applyMoveFromOrigin`, `hitTestHandle`) |
+| `src/shapes.js` | Shape classes: `RectangleShape`, `RoundRectShape`, `EllipseShape`, `ArcShape`, `LineShape`, `BezierShape`, `GroupShape`, `TextShape`; geometry helpers (`normalize`, `snap`, `offsetShape`, `applyMoveFromOrigin`, `hitTestHandle`) |
 | `src/renderer.js` | Canvas rendering: shapes, selection handles, bézier draft, rubber-band, grid |
 | `src/tool-controller.js` | Mouse and keyboard event handling for all tools; text overlay lifecycle |
 | `src/toolbar.js` | Tool buttons (single/double-click sticky logic), fill pattern swatches, stroke swatches |
@@ -148,10 +169,12 @@ A grid can be toggled on/off and snap-to-grid enabled via the grid controls. Gri
 | `src/history.js` | Undo/redo via deep-clone snapshots (`savePreOp` / `commit`) |
 | `src/patterns.js` | 37 QuickDraw 8×8 bit patterns; `buildPattern` creates `CanvasPattern` objects |
 | `src/text-defs.js` | Font list, font size list, style definitions, `fontCss()` helper |
-| `src/ruler.js` | Pixel/mm rulers with mouse-position tick |
+| `src/ruler.js` | Pixel/mm rulers with mouse-position tick and draggable origin (click corner to set zero point) |
 | `src/grid-controls.js` | Grid toggle, snap toggle, grid size inputs |
 | `src/print.js` | Off-screen canvas print rendering |
+| `src/document.js` | Native `.mcd` save (JSON serialisation) and load; shape reconstruction from stored data |
 | `src/import.js` | PICT v1/v2 parser and MacDraw II `.drw` parser |
+| `src/inspector.js` | X/Y/W/H fields that read and write shape geometry for the selected shape |
 
 ## Testing
 

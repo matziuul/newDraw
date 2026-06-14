@@ -15,6 +15,11 @@ export class Renderer {
 
         if (state.showGrid) this._drawGrid();
 
+        // Origin crosshair and drag preview
+        const originX = state.rulerDragOrigin ? state.rulerDragOrigin.x : state.rulerOriginX;
+        const originY = state.rulerDragOrigin ? state.rulerDragOrigin.y : state.rulerOriginY;
+        if (originX !== 0 || originY !== 0) this._drawOriginCrosshair(originX, originY, !!state.rulerDragOrigin);
+
         for (const shape of state.shapes) {
             if (shape.id === state.editingTextId) continue; // overlay handles rendering while editing
             shape.draw(ctx, patterns, state.quickDraw);
@@ -85,6 +90,17 @@ export class Renderer {
                 ctx.lineTo(x + r, y + height);      ctx.arcTo(x,         y + height, x,          y + height - r, r);
                 ctx.lineTo(x, y + r);               ctx.arcTo(x,         y,          x + r,      y,              r);
                 ctx.closePath(); ctx.stroke();
+            } else if (d.type === 'arc') {
+                const cx = x + width / 2, cy = y + height / 2;
+                const rx = width / 2, ry = height / 2, q = d.quadrant ?? 1;
+                ctx.beginPath();
+                switch (q) {
+                    case 0: ctx.ellipse(cx, cy, rx, ry, 0, -Math.PI / 2,    0,           false); break;
+                    case 1: ctx.ellipse(cx, cy, rx, ry, 0,  0,              Math.PI / 2, false); break;
+                    case 2: ctx.ellipse(cx, cy, rx, ry, 0,  Math.PI / 2,    Math.PI,     false); break;
+                    case 3: ctx.ellipse(cx, cy, rx, ry, 0,  3*Math.PI / 2,  Math.PI,     true ); break;
+                }
+                ctx.stroke();
             } else {
                 ctx.strokeRect(x + 0.5, y + 0.5, width, height);
             }
@@ -158,7 +174,7 @@ export class Renderer {
     _drawSelection(shape) {
         if (shape.type === 'bezier') { this._drawBezierSelection(shape); return; }
 
-        const ctx = this.ctx, b = shape.getBounds(), pad = 4;
+        const ctx = this.ctx, b = shape.getSelectionBounds?.() ?? shape.getBounds(), pad = 4;
         ctx.save();
         ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1; ctx.setLineDash([5, 3]);
         ctx.strokeRect(b.x - pad + 0.5, b.y - pad + 0.5, b.width + pad*2, b.height + pad*2);
@@ -246,6 +262,19 @@ export class Renderer {
             }
             ctx.strokeRect(p.x - HS + 0.5, p.y - HS + 0.5, HS*2 - 1, HS*2 - 1);
         }
+        ctx.restore();
+    }
+
+    _drawOriginCrosshair(ox, oy, isPreview) {
+        const { ctx, canvas } = this;
+        ctx.save();
+        ctx.strokeStyle = isPreview ? 'rgba(0,85,255,0.35)' : 'rgba(0,85,255,0.25)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        if (ox !== 0) { ctx.moveTo(ox + 0.5, 0); ctx.lineTo(ox + 0.5, canvas.height); }
+        if (oy !== 0) { ctx.moveTo(0, oy + 0.5); ctx.lineTo(canvas.width, oy + 0.5); }
+        ctx.stroke();
         ctx.restore();
     }
 }

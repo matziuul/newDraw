@@ -16,7 +16,7 @@
 
         #app {
             display: grid;
-            grid-template-columns: 96px 1fr;
+            grid-template-columns: 96px 1fr 150px;
             grid-template-rows: 42px 1fr 24px;
             height: 100vh;
         }
@@ -191,6 +191,73 @@
         .dash-swatch.active { outline: 2px solid #0055ff; outline-offset: 1px; }
         #dashGrid { display: flex; flex-direction: column; gap: 3px; }
 
+        .arrow-swatch {
+            width: 48px; height: 16px;
+            border: 1px solid black;
+            background: white;
+            cursor: pointer;
+            display: block;
+            image-rendering: pixelated;
+        }
+        .arrow-swatch.active { outline: 2px solid #0055ff; outline-offset: 1px; }
+        #arrowGrid { display: flex; flex-direction: column; gap: 3px; }
+
+
+        /* ── Inspector panel ── */
+        .inspector {
+            background: #e5e5e5;
+            border-left: 2px solid black;
+            padding: 6px 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            overflow-y: auto;
+            font-size: 11px;
+            font-family: Geneva, Chicago, Arial, sans-serif;
+        }
+        .insp-title {
+            font-weight: bold;
+            font-size: 11px;
+            border-bottom: 1px solid #999;
+            padding-bottom: 4px;
+            user-select: none;
+        }
+        .insp-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .insp-label {
+            width: 14px;
+            flex-shrink: 0;
+            color: #333;
+            user-select: none;
+        }
+        .insp-input {
+            width: 100%;
+            font: 11px Geneva, Chicago, Arial, sans-serif;
+            border: 1px solid #888;
+            background: white;
+            padding: 1px 3px;
+            height: 18px;
+            box-sizing: border-box;
+            text-align: right;
+            -moz-appearance: textfield;
+        }
+        .insp-input:disabled {
+            background: #d4d4d4;
+            color: #888;
+            border-color: #aaa;
+        }
+        .insp-input::-webkit-inner-spin-button,
+        .insp-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        .insp-unit {
+            text-align: right;
+            color: #555;
+            font-size: 10px;
+            padding-top: 2px;
+        }
+
         /* ── Text input overlay ── */
         #textInput {
             position: absolute;
@@ -317,6 +384,7 @@
         <button class="tool-button"        data-tool="ellipse"   title="Ellips (E)">◯</button>
         <button class="tool-button"        data-tool="line"      title="Linje (L)">／</button>
         <button class="tool-button"        data-tool="bezier"    title="Bézier (B)"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M4 22 C4 8 22 18 22 4" stroke-width="1.8" stroke-linecap="round"/><circle cx="4" cy="22" r="2.2" fill="currentColor" stroke="none"/><circle cx="22" cy="4" r="2.2" fill="currentColor" stroke="none"/><line x1="4" y1="22" x2="4" y2="8" stroke-width="1" opacity="0.65"/><circle cx="4" cy="8" r="1.8" fill="none" stroke-width="1" opacity="0.65"/><line x1="22" y1="4" x2="22" y2="18" stroke-width="1" opacity="0.65"/><circle cx="22" cy="18" r="1.8" fill="none" stroke-width="1" opacity="0.65"/></svg></button>
+        <button class="tool-button"        data-tool="arc"       title="Båge (A)"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M13 13 L13 2 A11 11 0 0 1 24 13 Z" stroke-width="1.7" stroke-linejoin="round"/></svg></button>
         <button class="tool-button"        data-tool="text"      title="Text (T)">A</button>
         <hr class="tool-divider" />
         <div class="pattern-pair">
@@ -333,6 +401,8 @@
         <div id="strokeGrid"></div>
         <hr class="tool-divider" />
         <div id="dashGrid"></div>
+        <hr class="tool-divider" />
+        <div id="arrowGrid"></div>
     </aside>
 
     <main class="editor-area">
@@ -346,6 +416,27 @@
             </div>
         </div>
     </main>
+
+    <aside class="inspector">
+        <div class="insp-title">Objekt</div>
+        <div class="insp-row">
+            <span class="insp-label">X</span>
+            <input class="insp-input" id="inspX" type="number">
+        </div>
+        <div class="insp-row">
+            <span class="insp-label">Y</span>
+            <input class="insp-input" id="inspY" type="number">
+        </div>
+        <div class="insp-row">
+            <span class="insp-label">B</span>
+            <input class="insp-input" id="inspW" type="number" min="0">
+        </div>
+        <div class="insp-row">
+            <span class="insp-label">H</span>
+            <input class="insp-input" id="inspH" type="number" min="0">
+        </div>
+        <div class="insp-unit" id="inspUnit">px</div>
+    </aside>
 
     <footer class="status-bar">
         <span id="statusTool">Verktyg: Select</span>
@@ -361,11 +452,12 @@
                 <option value="mm">mm</option>
             </select>
         </span>
-        <span class="hint">S/R/O/E/L/B/T · ⌘Z/⌘⇧Z · ⌘C/⌘V/⌘D · Del · ⌘]/⌘[ layer · ⌘L lock</span>
+        <span class="hint">S/R/O/E/L/B/A/T · ⌘Z/⌘⇧Z · ⌘C/⌘V/⌘D · Del · ⌘]/⌘[ layer · ⌘L lock</span>
     </footer>
 </div>
 
 <input type="file" id="importFile" accept=".pict,.pic,.drw,.bin" style="display:none">
+<input type="file" id="docFile"    accept=".mcd"                   style="display:none">
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

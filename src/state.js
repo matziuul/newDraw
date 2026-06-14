@@ -27,12 +27,17 @@ export class AppState {
         this.activeStrokeWidth      = 2;
         this.activeStrokeDash       = 0;
         this.activeStrokePatternIdx = 3;
+        this.activeArrowMode        = 0;
 
         this.showGrid = false;
         this.snapToGrid = false;
         this.gridSizePx = 10;
         this.gridSizeMm = 5;
         this.rulerUnit = 'px';
+
+        this.rulerOriginX = 0;   // canvas pixel that maps to ruler value 0
+        this.rulerOriginY = 0;
+        this.rulerDragOrigin = null; // {x,y} while corner is being dragged
     }
 
     get selectedShape() {
