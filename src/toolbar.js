@@ -1,5 +1,5 @@
 import { QD_PATTERNS, buildPattern } from './patterns.js';
-import { STROKE_DASHES, ARROW_MODES } from './shapes.js';
+import { STROKE_DASHES, ARROW_MODES, RectangleShape, RoundRectShape } from './shapes.js';
 
 const STROKE_WIDTHS = [1, 2, 3, 4, 6, 8];
 
@@ -15,6 +15,7 @@ export class Toolbar {
         this._buildStrokeSwatches();
         this._buildDashSwatches();
         this._buildArrowSwatches();
+        this._buildCornerSwatches();
         this._attachEvents();
     }
 
@@ -46,6 +47,62 @@ export class Toolbar {
                 if (sel) {
                     const snap = this.history.savePreOp();
                     sel.fillIdx = idx;
+                    this.history.commit(snap);
+                    this.renderer.render();
+                }
+                this.sync();
+            });
+            grid.appendChild(cv);
+        });
+    }
+
+    _buildCornerSwatches() {
+        // class 1=square, 2–6 = corner radius n/16 inch; preview radii chosen for visual clarity
+        const CORNER_CLASSES = [1, 2, 3, 4, 5, 6];
+        const PREVIEW_RADII  = [0, 3, 5, 7, 9, 11];
+        const TITLES = ['Fyrkant', '1/8"', '3/16"', '1/4"', '5/16"', '3/8"'];
+        const grid = document.getElementById('cornerGrid');
+        CORNER_CLASSES.forEach((cls, i) => {
+            const cv = document.createElement('canvas');
+            cv.width = 36; cv.height = 22;
+            cv.className = 'corner-swatch';
+            cv.title = TITLES[i];
+            if (cls === this.state.activeCornerClass) cv.classList.add('active');
+            const ctx = cv.getContext('2d');
+            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 36, 22);
+            const r = PREVIEW_RADII[i], x = 3.5, y = 3.5, w = 29, h = 15;
+            ctx.strokeStyle = 'black'; ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);     ctx.arcTo(x + w, y,     x + w, y + r,     r);
+            ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+            ctx.lineTo(x + r, y + h);     ctx.arcTo(x,     y + h, x,     y + h - r, r);
+            ctx.lineTo(x, y + r);         ctx.arcTo(x,     y,     x + r, y,         r);
+            ctx.closePath(); ctx.stroke();
+
+            cv.addEventListener('click', () => {
+                this.state.activeCornerClass = cls;
+                const sel = this.state.selectedShape;
+                if (sel && (sel.type === 'roundrect' || sel.type === 'rectangle')) {
+                    const snap = this.history.savePreOp();
+                    const qdPenW = sel.strokeWidth + 2;
+                    const ovalDiamPts = cls >= 2 ? cls * 9 : 0;
+                    const cornerPts = Math.max(0, Math.floor((ovalDiamPts - qdPenW) / 2));
+                    let replacement;
+                    if (cornerPts > 0) {
+                        replacement = new RoundRectShape(sel.x, sel.y, sel.width, sel.height);
+                        replacement.cornerRadius = Math.round(cornerPts * 96 / 72);
+                    } else {
+                        replacement = new RectangleShape(sel.x, sel.y, sel.width, sel.height);
+                    }
+                    replacement.id = sel.id;
+                    replacement.fillIdx = sel.fillIdx;
+                    replacement.strokeWidth = sel.strokeWidth;
+                    replacement.strokeDash = sel.strokeDash ?? 0;
+                    replacement.strokePatternIdx = sel.strokePatternIdx;
+                    replacement.locked = sel.locked ?? false;
+                    const idx = this.state.shapes.indexOf(sel);
+                    if (idx >= 0) this.state.shapes[idx] = replacement;
                     this.history.commit(snap);
                     this.renderer.render();
                 }
@@ -208,6 +265,9 @@ export class Toolbar {
             s.classList.toggle('active', i === this.state.activeStrokeDash));
         document.querySelectorAll('.arrow-swatch').forEach((s, i) =>
             s.classList.toggle('active', i === this.state.activeArrowMode));
+        const CORNER_CLASSES = [1, 2, 3, 4, 5, 6];
+        document.querySelectorAll('.corner-swatch').forEach((s, i) =>
+            s.classList.toggle('active', CORNER_CLASSES[i] === this.state.activeCornerClass));
     }
 
     _attachEvents() {

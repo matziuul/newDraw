@@ -202,6 +202,17 @@
         .arrow-swatch.active { outline: 2px solid #0055ff; outline-offset: 1px; }
         #arrowGrid { display: flex; flex-direction: column; gap: 3px; }
 
+        .corner-swatch {
+            width: 36px; height: 22px;
+            border: 1px solid black;
+            background: white;
+            cursor: pointer;
+            display: block;
+            image-rendering: pixelated;
+        }
+        .corner-swatch.active { outline: 2px solid #0055ff; outline-offset: 1px; }
+        #cornerGrid { display: flex; flex-direction: column; gap: 3px; }
+
 
         /* ── Inspector panel ── */
         .inspector {
@@ -443,6 +454,8 @@
         <div id="dashGrid"></div>
         <hr class="tool-divider" />
         <div id="arrowGrid"></div>
+        <hr class="tool-divider" />
+        <div id="cornerGrid"></div>
     </aside>
 
     <main class="editor-area">

@@ -94,6 +94,18 @@ export class ToolController {
                 this.state.activeStrokePatternIdx = sel.strokePatternIdx ?? 3;
                 if (sel.type === 'line' || sel.type === 'bezier')
                     this.state.activeArrowMode = sel.arrowMode ?? 0;
+                if (sel.type === 'rectangle') {
+                    this.state.activeCornerClass = 1;
+                } else if (sel.type === 'roundrect') {
+                    const qdPenW = sel.strokeWidth + 2;
+                    let bestCls = 2, bestDiff = Infinity;
+                    for (let c = 2; c <= 6; c++) {
+                        const pts = Math.max(0, Math.floor((c * 9 - qdPenW) / 2));
+                        const diff = Math.abs(Math.round(pts * 96 / 72) - sel.cornerRadius);
+                        if (diff < bestDiff) { bestDiff = diff; bestCls = c; }
+                    }
+                    this.state.activeCornerClass = bestCls;
+                }
             }
             if (sel.type === 'text') {
                 this.state.activeFont      = sel.fontFamily;
@@ -644,7 +656,18 @@ export class ToolController {
                 if (d.type === 'rectangle')  shape = new RectangleShape(d.x, d.y, d.width, d.height);
                 else if (d.type === 'ellipse')   shape = new EllipseShape(d.x, d.y, d.width, d.height);
                 else if (d.type === 'line')      shape = new LineShape(d.x1, d.y1, d.x2, d.y2);
-                else if (d.type === 'roundrect') shape = new RoundRectShape(d.x, d.y, d.width, d.height);
+                else if (d.type === 'roundrect') {
+                    const cls = this.state.activeCornerClass;
+                    const qdPenW = this.state.activeStrokeWidth + 2;
+                    const ovalDiamPts = cls >= 2 ? cls * 9 : 0;
+                    const cornerPts = Math.max(0, Math.floor((ovalDiamPts - qdPenW) / 2));
+                    if (cornerPts > 0) {
+                        shape = new RoundRectShape(d.x, d.y, d.width, d.height);
+                        shape.cornerRadius = Math.round(cornerPts * 96 / 72);
+                    } else {
+                        shape = new RectangleShape(d.x, d.y, d.width, d.height);
+                    }
+                }
                 else if (d.type === 'arc') {
                     shape = new ArcShape(d.x, d.y, d.width, d.height);
                     shape.quadrant = d.quadrant ?? 1;

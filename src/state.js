@@ -31,6 +31,7 @@ export class AppState {
         this.activeStrokeDash       = 0;
         this.activeStrokePatternIdx = 3;
         this.activeArrowMode        = 0;
+        this.activeCornerClass      = 3; // 1=square, 2=1/8", 3=3/16", 4=1/4", 5=5/16", 6=3/8"
 
         this.showGrid = false;
         this.snapToGrid = false;

@@ -337,7 +337,10 @@ export class BezierShape {
         if (this.points.length < 2) return;
         const strokePat = patterns[this.strokePatternIdx ?? 3];
         ctx.save();
-        ctx.lineWidth = this.strokeWidth;
+        // Canvas anti-aliasing makes 45° strokes appear ~0.71× as heavy as axis-aligned
+        // strokes at the same lineWidth. Compensate for 1px pens by rendering at √2 ≈ 1.41px
+        // so diagonal segments match horizontal/vertical visual weight.
+        ctx.lineWidth = this.strokeWidth === 1 ? Math.SQRT2 : this.strokeWidth;
         ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
         const path = this._makePath();
