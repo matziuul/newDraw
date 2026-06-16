@@ -1,4 +1,4 @@
-import { PX_PER_MM } from './state.js';
+import { PX_PER_MM, PX_PER_IN } from './state.js';
 
 export class Ruler {
     constructor(hCanvas, vCanvas, state) {
@@ -62,6 +62,41 @@ export class Ruler {
                         ctx.translate(w - 14, px - 2);
                         ctx.rotate(-Math.PI / 2);
                         ctx.fillText(`${mm}`, 0, 0);
+                        ctx.restore();
+                    }
+                }
+            }
+        } else if (this.state.rulerUnit === 'in') {
+            // 1" = 96px; subdivide to 1/8" (12px) steps
+            const stepPx = PX_PER_IN / 8; // 12px
+            const firstI = Math.ceil(-ox / stepPx);
+            const lastI  = Math.floor((lenPx - ox) / stepPx);
+            for (let i = firstI; i <= lastI; i++) {
+                const px = i * stepPx + ox;
+                if (px < 0 || px > lenPx) continue;
+                const isIn   = i % 8 === 0;
+                const isHalf = i % 4 === 0;
+                const isQtr  = i % 2 === 0;
+                const tick   = isIn ? 13 : isHalf ? 9 : isQtr ? 6 : 4;
+                ctx.strokeStyle = isIn ? '#444' : '#999';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                if (isH) {
+                    ctx.moveTo(px + 0.5, h - tick); ctx.lineTo(px + 0.5, h);
+                } else {
+                    ctx.moveTo(w - tick, px + 0.5); ctx.lineTo(w, px + 0.5);
+                }
+                ctx.stroke();
+                if (isIn && px >= 2 && px <= lenPx - 2) {
+                    ctx.font = '8px Geneva, monospace';
+                    ctx.fillStyle = '#333';
+                    if (isH) {
+                        ctx.fillText(String(i / 8), px + 2, h - 14);
+                    } else {
+                        ctx.save();
+                        ctx.translate(w - 14, px - 2);
+                        ctx.rotate(-Math.PI / 2);
+                        ctx.fillText(String(i / 8), 0, 0);
                         ctx.restore();
                     }
                 }

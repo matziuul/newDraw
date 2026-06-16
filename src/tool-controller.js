@@ -1,5 +1,5 @@
 import {
-    hitTestHandle, hitTestBezierHandle, HANDLE_DEFS,
+    hitTestHandle, hitTestBezierHandle, hitTestArcHandle, HANDLE_DEFS,
     RectangleShape, EllipseShape, LineShape, BezierShape, TextShape, RoundRectShape, ArcShape,
     nextUid, offsetShape, applyMoveFromOrigin,
 } from './shapes.js';
@@ -262,6 +262,27 @@ export class ToolController {
         const state = this.state;
         const sel   = state.selectedShape;
 
+        // Arc endpoint handle drag (single selected arc, unlocked)
+        if (sel?.type === 'arc' && !sel.locked) {
+            const ah = hitTestArcHandle(pos.x, pos.y, sel);
+            if (ah !== null) {
+                // Convert quarter arc to general representation before dragging
+                if (sel.startAngleDeg === undefined) {
+                    const qStart = [0, 90, 180, 270][sel.quadrant ?? 1];
+                    sel.startAngleDeg = qStart;
+                    sel.arcAngleDeg   = 90;
+                }
+                this.preOpSnapshot = this.history.savePreOp();
+                this.originShape = sel.clone();
+                this.activeHandle = ah;
+                this.startX = pos.x; this.startY = pos.y;
+                this.isDragging = true; this.dragMode = 'arcHandle'; this.hasMoved = false;
+                state.hoveredArcHandle = null;
+                state.dragArcHandle = ah;
+                return;
+            }
+        }
+
         // Bezier handle drag (single selected bezier, unlocked)
         if (sel?.type === 'bezier' && !sel.locked) {
             const bh = hitTestBezierHandle(pos.x, pos.y, sel);
@@ -431,6 +452,8 @@ export class ToolController {
             this._applyResize(pos);
         } else if (this.dragMode === 'bezierHandle') {
             this._applyBezierHandleDrag(rawPos);
+        } else if (this.dragMode === 'arcHandle') {
+            this._applyArcHandleDrag(rawPos);
         }
 
         this._updateStatusWhileDragging(pos);
@@ -484,6 +507,39 @@ export class ToolController {
         if (h.includes('s')) { shape.height = this._snapVal(orig.y + orig.height + dy) - shape.y; }
     }
 
+    _applyArcHandleDrag(pos) {
+        const shape = this.state.selectedShape;
+        const orig  = this.originShape;
+        if (!shape || !orig || shape.type !== 'arc') return;
+
+        const { x, y, width: w, height: h } = shape.getBounds();
+        const cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
+        if (rx === 0 || ry === 0) return;
+
+        // Parametric angle from mouse position (normalise by radii → works for ellipses)
+        const nx = (pos.x - cx) / rx;
+        const ny = (pos.y - cy) / ry;
+        // Mac angle: 0°=12 o'clock, clockwise
+        const macAngle = ((Math.atan2(ny, nx) + Math.PI / 2) * 180 / Math.PI + 360) % 360;
+
+        const origStart = orig.startAngleDeg ?? [0, 90, 180, 270][orig.quadrant ?? 1];
+        const origArc   = orig.arcAngleDeg   ?? 90;
+
+        if (this.activeHandle === 0) {
+            // Drag start handle — keep end angle fixed
+            const endAngle = (origStart + origArc) % 360;
+            shape.startAngleDeg = macAngle;
+            shape.arcAngleDeg   = Math.max(1, ((endAngle - macAngle) + 360) % 360);
+        } else {
+            // Drag end handle — keep start angle fixed
+            shape.startAngleDeg = origStart;
+            shape.arcAngleDeg   = Math.max(1, (macAngle - origStart + 360) % 360);
+        }
+        // Keep quadrant in sync so resize handles stay correct
+        const mid = ((shape.startAngleDeg + shape.arcAngleDeg / 2) % 360 + 360) % 360;
+        shape.quadrant = Math.min(3, Math.floor(mid / 90));
+    }
+
     _applyBezierHandleDrag(rawPos) {
         const shape = this.state.selectedShape, orig = this.originShape;
         if (!shape || !orig) return;
@@ -534,8 +590,17 @@ export class ToolController {
         const state = this.state;
         const sel = state.selectedShape;
         state.hoveredBezierHandle = null;
+        state.hoveredArcHandle    = null;
 
         if (sel) {
+            if (sel.type === 'arc' && !sel.locked) {
+                const ah = hitTestArcHandle(pos.x, pos.y, sel);
+                if (ah !== null) {
+                    state.hoveredArcHandle = ah;
+                    this.canvas.style.cursor = 'crosshair';
+                    return;
+                }
+            }
             if (sel.type === 'bezier' && !sel.locked) {
                 const bh = hitTestBezierHandle(pos.x, pos.y, sel);
                 if (bh) {
@@ -616,7 +681,7 @@ export class ToolController {
                 }
             }
 
-        } else if ((this.dragMode === 'move' || this.dragMode === 'resize' || this.dragMode === 'bezierHandle' || this.dragMode === 'moveMany') && this.hasMoved) {
+        } else if ((this.dragMode === 'move' || this.dragMode === 'resize' || this.dragMode === 'bezierHandle' || this.dragMode === 'arcHandle' || this.dragMode === 'moveMany') && this.hasMoved) {
             this.history.commit(this.preOpSnapshot);
         }
 
@@ -644,6 +709,7 @@ export class ToolController {
         this.activeHandle = null; this.originShape = null; this.originShapes = null;
         this.preOpSnapshot = null; this.hasMoved = false;
         this.state.dragBezierHandle = null;
+        this.state.dragArcHandle    = null;
         this._update();
     }
 

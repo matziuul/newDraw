@@ -1,4 +1,5 @@
 export const PX_PER_MM = 96 / 25.4;
+export const PX_PER_IN = 96;
 
 export class AppState {
     constructor() {
@@ -14,6 +15,8 @@ export class AppState {
         this.lastDupSrcPos = null;
         this.hoveredBezierHandle = null;
         this.dragBezierHandle = null;
+        this.hoveredArcHandle = null;  // 0=start, 1=end, null=none
+        this.dragArcHandle    = null;
         this.selectedIds = [];   // multi-selection (non-empty only when >1 shapes selected)
         this.rubberBand  = null; // { x, y, w, h } while rubber-band drag is active
 
@@ -33,11 +36,15 @@ export class AppState {
         this.snapToGrid = false;
         this.gridSizePx = 10;
         this.gridSizeMm = 5;
+        this.gridSizeIn = 0.25;
         this.rulerUnit = 'px';
 
         this.rulerOriginX = 0;   // canvas pixel that maps to ruler value 0
         this.rulerOriginY = 0;
         this.rulerDragOrigin = null; // {x,y} while corner is being dragged
+
+        this.pageW = null;   // px — page width for break markers; null = off
+        this.pageH = null;   // px — page height for break markers
     }
 
     get selectedShape() {
@@ -45,6 +52,8 @@ export class AppState {
     }
 
     get gridStep() {
-        return this.rulerUnit === 'mm' ? this.gridSizeMm * PX_PER_MM : this.gridSizePx;
+        if (this.rulerUnit === 'mm') return this.gridSizeMm * PX_PER_MM;
+        if (this.rulerUnit === 'in') return this.gridSizeIn * PX_PER_IN;
+        return this.gridSizePx;
     }
 }

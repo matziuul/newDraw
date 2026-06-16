@@ -321,16 +321,16 @@
 
         #rulerH {
             display: block;
-            width: 1200px !important;
-            height: 20px !important;
+            width: 1200px;
+            height: 20px;
             border-bottom: 1px solid #888;
             image-rendering: pixelated;
         }
 
         #rulerV {
             display: block;
-            width: 20px !important;
-            height: 900px !important;
+            width: 20px;
+            height: 900px;
             border-right: 1px solid #888;
             image-rendering: pixelated;
         }
@@ -368,6 +368,46 @@
         .grid-controls label { display: flex; align-items: center; gap: 3px; cursor: pointer; }
         .grid-controls select { font: inherit; font-size: 11px; border: 1px solid #888; background: white; padding: 0 2px; height: 18px; cursor: pointer; }
         .grid-controls .sep { color: #bbb; }
+
+        /* ── Canvas Size dialog ── */
+        dialog#canvasSizeDialog {
+            border: 2px solid black;
+            padding: 0;
+            font-family: Geneva, Chicago, Arial, sans-serif;
+            font-size: 13px;
+            box-shadow: 3px 3px 0 rgba(0,0,0,0.4);
+            min-width: 310px;
+        }
+        dialog#canvasSizeDialog::backdrop { background: rgba(0,0,0,0.25); }
+        #canvasSizeDialog .dlg-title {
+            background: black; color: white;
+            padding: 5px 12px; font-weight: bold; font-size: 13px; user-select: none;
+        }
+        #canvasSizeDialog .dlg-body {
+            padding: 12px 16px; display: flex; flex-direction: column; gap: 9px;
+        }
+        #canvasSizeDialog .dlg-row { display: flex; align-items: center; gap: 8px; }
+        #canvasSizeDialog .dlg-label { width: 110px; flex-shrink: 0; color: #333; }
+        #canvasSizeDialog select,
+        #canvasSizeDialog input[type="number"] {
+            font: 12px Geneva, Chicago, Arial, sans-serif;
+            border: 1px solid #888; background: white; height: 20px; padding: 0 4px;
+        }
+        #canvasSizeDialog input[type="number"] {
+            width: 72px; text-align: right; -moz-appearance: textfield;
+        }
+        #canvasSizeDialog input[type="number"]::-webkit-inner-spin-button,
+        #canvasSizeDialog input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+        #canvasSizeDialog .dlg-mm { font-size: 11px; color: #666; min-width: 52px; }
+        #canvasSizeDialog .dlg-footer {
+            display: flex; justify-content: flex-end; gap: 8px;
+            padding: 8px 16px 12px; border-top: 1px solid #ddd;
+        }
+        #canvasSizeDialog button {
+            font: 12px Geneva, Chicago, Arial, sans-serif;
+            padding: 3px 16px; border: 2px solid black; background: white; cursor: pointer;
+        }
+        #canvasSizeDialog button.primary { background: black; color: white; }
     </style>
 </head>
 <body>
@@ -450,6 +490,7 @@
             <select id="selUnit" title="Ruler unit">
                 <option value="px">px</option>
                 <option value="mm">mm</option>
+                <option value="in">in</option>
             </select>
         </span>
         <span class="hint">S/R/O/E/L/B/A/T · ⌘Z/⌘⇧Z · ⌘C/⌘V/⌘D · Del · ⌘]/⌘[ layer · ⌘L lock</span>
@@ -458,6 +499,47 @@
 
 <input type="file" id="importFile" accept=".pict,.pic,.drw,.bin" style="display:none">
 <input type="file" id="docFile"    accept=".mcd"                   style="display:none">
+
+<dialog id="canvasSizeDialog">
+    <div class="dlg-title">Canvas Size</div>
+    <div class="dlg-body">
+        <div class="dlg-row">
+            <span class="dlg-label">Preset</span>
+            <select id="dlgPreset">
+                <option value="">Custom</option>
+                <option value="a4p">A4 Portrait (794×1123)</option>
+                <option value="a4l">A4 Landscape (1123×794)</option>
+                <option value="ltp">US Letter Portrait (816×1056)</option>
+                <option value="ltl">US Letter Landscape (1056×816)</option>
+            </select>
+        </div>
+        <div class="dlg-row">
+            <span class="dlg-label">Width</span>
+            <input id="dlgW" type="number" min="100" max="9999" value="1200">
+            <span class="dlg-mm" id="dlgWmm"></span>
+        </div>
+        <div class="dlg-row">
+            <span class="dlg-label">Height</span>
+            <input id="dlgH" type="number" min="100" max="9999" value="900">
+            <span class="dlg-mm" id="dlgHmm"></span>
+        </div>
+        <div class="dlg-row">
+            <span class="dlg-label">Page markers</span>
+            <select id="dlgMarkers">
+                <option value="">None</option>
+                <option value="a4p">A4 Portrait</option>
+                <option value="a4l">A4 Landscape</option>
+                <option value="ltp">US Letter Portrait</option>
+                <option value="ltl">US Letter Landscape</option>
+            </select>
+        </div>
+    </div>
+    <div class="dlg-footer">
+        <button id="dlgCancel">Cancel</button>
+        <button id="dlgApply" class="primary">Apply</button>
+    </div>
+</dialog>
+
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

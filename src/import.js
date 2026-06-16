@@ -1,4 +1,4 @@
-import { RectangleShape, EllipseShape, LineShape, TextShape, RoundRectShape } from './shapes.js';
+import { RectangleShape, EllipseShape, LineShape, TextShape, RoundRectShape, ArcShape, GroupShape } from './shapes.js';
 import { QD_PATTERNS } from './patterns.js';
 
 // ─── Public entry point ───────────────────────────────────────────────────────
@@ -62,6 +62,21 @@ function popcount(n) {
     let c = 0; while (n) { c += n & 1; n >>>= 1; } return c;
 }
 
+function scaleShapes(shapes, s) {
+    for (const sh of shapes) {
+        if ('x1' in sh) {
+            sh.x1 = Math.round(sh.x1 * s); sh.y1 = Math.round(sh.y1 * s);
+            sh.x2 = Math.round(sh.x2 * s); sh.y2 = Math.round(sh.y2 * s);
+        } else if ('x' in sh) {
+            sh.x = Math.round(sh.x * s); sh.y = Math.round(sh.y * s);
+            sh.width  = Math.round(sh.width  * s);
+            sh.height = Math.round(sh.height * s);
+            if ('cornerRadius' in sh) sh.cornerRadius = Math.round(sh.cornerRadius * s);
+        }
+        if (sh.children) scaleShapes(sh.children, s);
+    }
+}
+
 // ─── PICT parser ──────────────────────────────────────────────────────────────
 
 function parsePict(buffer, bytes) {
@@ -111,7 +126,7 @@ class PictParser {
     }
     rrect(r, strokeOnly) {
         const s = new RoundRectShape(r.l, r.t, r.r-r.l, r.b-r.t);
-        s.cornerRadius = this.ovalSize;
+        s.cornerRadius = Math.round(this.ovalSize / 2);
         s.fillIdx = strokeOnly ? 0 : this.fillPat;
         s.strokeWidth = this.penW;
         return s;
@@ -119,6 +134,17 @@ class PictParser {
     line(a, b) {
         const s = new LineShape(a.x, a.y, b.x, b.y);
         s.strokeWidth = this.penW;
+        return s;
+    }
+    arc(r, startAngle, arcAngle, strokeOnly, usePen) {
+        const s = new ArcShape(r.l, r.t, r.r - r.l, r.b - r.t);
+        // PICT angles are degrees CW from 12 o'clock; map arc midpoint to our quadrant
+        const mid = ((startAngle + arcAngle / 2) % 360 + 360) % 360;
+        s.quadrant = Math.min(3, Math.floor(mid / 90));
+        s.strokeWidth = this.penW;
+        if (strokeOnly) s.fillIdx = 0;
+        else if (usePen)  s.fillIdx = this.penPat;
+        else              s.fillIdx = this.fillPat;
         return s;
     }
 
@@ -138,6 +164,7 @@ class PictParser {
             }
             this.runV2();
         }
+        scaleShapes(this.shapes, 96 / 72);
         return this.shapes;
     }
 
@@ -243,7 +270,24 @@ class PictParser {
         case 0x43: { this.readRect(); break; }
         case 0x44: { const r=this.readRect(); this.lastRect=r;
             const s=this.rrect(r,false); s.strokeWidth=0; this.shapes.push(s); break; }
-        case 0x48: case 0x49: case 0x4A: case 0x4B: case 0x4C: break; // same-rrect, 0 bytes
+        case 0x48: { // frameSameRRect — apply stroke and inset the preceding fill-only rrect
+            // PICT exports filled+stroked shapes by expanding the fillRRect outward by
+            // penW/2 on each side so the stroke straddles the true shape boundary.
+            // Inset back to get the real shape dimensions; cornerRadius shrinks by the same amount.
+            const last = this.shapes[this.shapes.length - 1];
+            if (last && last.type === 'roundrect' && last.strokeWidth === 0) {
+                const inset = Math.floor(this.penW / 2);
+                last.x      += inset;
+                last.y      += inset;
+                last.width  -= inset * 2;
+                last.height -= inset * 2;
+                last.cornerRadius  = Math.max(0, Math.floor((this.ovalSize - this.penW) / 2));
+                last.strokeWidth   = Math.max(1, this.penW - 2);
+                last.strokePatternIdx = this.penPat;
+            }
+            break;
+        }
+        case 0x49: case 0x4A: case 0x4B: case 0x4C: break; // same-rrect variants, 0 bytes
 
         // ── Oval ──
         case 0x50: { const r=this.readRect(); this.lastRect=r; this.shapes.push(this.oval(r,true)); break; }
@@ -255,9 +299,20 @@ class PictParser {
             const s=this.oval(r,false); s.strokeWidth=0; this.shapes.push(s); break; }
         case 0x58: case 0x59: case 0x5A: case 0x5B: case 0x5C: break; // same-oval, 0 bytes
 
-        // ── Arc (skip — no arc type yet) ──
-        case 0x60: case 0x61: case 0x62: case 0x63: case 0x64: this.skip(12); break;
-        case 0x68: case 0x69: case 0x6A: case 0x6B: case 0x6C: this.skip(4); break;
+        // ── Arc ──
+        case 0x60: case 0x61: case 0x64: {
+            const r = this.readRect(), sa = this.i16(), aa = this.i16();
+            this.lastRect = r;
+            this.shapes.push(this.arc(r, sa, aa, op === 0x60, op === 0x61));
+            break;
+        }
+        case 0x62: case 0x63: { const r = this.readRect(); this.lastRect = r; this.skip(4); break; }
+        case 0x68: case 0x69: case 0x6C: {
+            const sa = this.i16(), aa = this.i16();
+            if (this.lastRect) this.shapes.push(this.arc(this.lastRect, sa, aa, op === 0x68, op === 0x69));
+            break;
+        }
+        case 0x6A: case 0x6B: this.skip(4); break;
 
         // ── Polygon ──
         case 0x70: case 0x71: case 0x72: case 0x73: case 0x74: this.readPoly(op); break;
@@ -359,19 +414,139 @@ function parseMacDraw(buffer, bytes) {
     const startOffset = findMacDrawObjects(bytes);
     if (startOffset < 0) throw new Error('MacDraw II: could not locate drawing objects in file.');
 
-    // Collect all record-start positions (02 03 type flags, type < 0x20)
+    // Diagnostic: dump the first 32 bytes from startOffset
+
+    // Collect all record-start positions (02 03 type flags, type < 0x20).
+    // Enforce a minimum gap of 24 bytes (= minimum record size: 4 header + 16 bbox + 4 attr)
+    // so that any spurious 02 03 XX inside a record body never shadows the next real record.
     const recs = [];
+    // Force-insert startOffset when the record there has a non-standard marker byte
+    // (e.g. 0x05 for reshape arcs) that the pattern scanner won't pick up.
+    if (startOffset >= 0 &&
+        bytes[startOffset] >= 0x02 &&
+        bytes[startOffset + 1] !== 0x03 &&
+        bytes[startOffset + 2] < 0x20) {
+        recs.push(startOffset);
+    }
     for (let i = startOffset; i < bytes.length - 3; i++) {
-        if (bytes[i] === 0x02 && bytes[i+1] === 0x03 && bytes[i+2] < 0x20) recs.push(i);
+        if (bytes[i] >= 0x02 && bytes[i+1] >= 0x01 && bytes[i+2] < 0x20) {
+            if (recs.length === 0 || i - recs[recs.length - 1] >= 24) recs.push(i);
+        }
+    }
+    console.log('MDraw recs found:', recs.length, 'at offsets', recs.slice(0, 10).map(r => '0x'+r.toString(16)));
+    for (let _ri = 0; _ri < Math.min(recs.length, 5); _ri++) {
+        const _o = recs[_ri];
+        const _len = _ri + 1 < recs.length ? recs[_ri+1] - _o : bytes.length - _o;
+        const _d = Array.from({length: Math.min(48, _len)}, (_, k) => bytes[_o+k].toString(16).padStart(2,'0')).join(' ');
+        console.log(`  rec[${_ri}] 0x${_o.toString(16)} len=${_len}: ${_d}`);
     }
     recs.push(bytes.length);
 
+    // First pass: collect raw Fixed16.16 bboxes for all candidate records
+    const rawBoxes = [];
     for (let ri = 0; ri < recs.length - 1; ri++) {
         const o = recs[ri];
-        if (recs[ri+1] - o < 20) continue; // too small for coordinate data (group containers etc.)
+        if (recs[ri+1] - o < 20 || o + 20 > bytes.length) { rawBoxes.push(null); continue; }
+        const _t = readFixed(view, o + 4), _l = readFixed(view, o + 8);
+        const _f3 = readFixed(view, o + 12), _f4 = readFixed(view, o + 16);
+        // Lines (type 0x02) store absolute endpoints and always have zero fractional parts.
+        // Rects/ovals have sub-pixel fractions from free-hand drawing.
+        const _recLen = recs[ri+1] - o;
+        const _isLine = bytes[o+2]===0x02 &&
+            !(bytes[o+6]|bytes[o+7]|bytes[o+10]|bytes[o+11]|
+              bytes[o+14]|bytes[o+15]|bytes[o+18]|bytes[o+19]);
+        // Reshape arcs have marker byte 0x05 instead of 0x03; bbox is still absolute.
+        const _isArc = (bytes[o+2]===0x01 || (bytes[o+2]===0x02 && bytes[o+1]===0x05)) && _recLen >= 28;
+        if (_isLine) {
+            rawBoxes.push({ top: Math.min(_t, _f3), left: Math.min(_l, _f4),
+                            bot: Math.max(_t, _f3), rgt: Math.max(_l, _f4) });
+        } else if (_isArc) {
+            // Arc bbox is stored as absolute (top, left, BOTTOM, RIGHT)
+            rawBoxes.push({ top: _t, left: _l, bot: _f3, rgt: _f4 });
+        } else {
+            rawBoxes.push({ top: _t, left: _l, bot: _f3, rgt: _f4 });
+        }
+    }
 
-        const type = bytes[o+2], flags = bytes[o+3];
-        const shape = parseMacDrawRecord(view, bytes, o, type, flags, scale);
+    const pageOffPtX = 0;
+    const pageOffPtY = 0;
+
+    // Identify group containers: must be a known group type (0x04 or 0x11) AND bbox
+    // must equal the union of 2+ records inside it. Shape types (0x02, 0x03, 0x0F, …)
+    // are never containers even if their bbox happens to encompass other records.
+    const GROUP_TYPES = new Set([0x04, 0x11]);
+    const groupContainerIdxs = new Set();
+    for (let i = 0; i < rawBoxes.length; i++) {
+        const a = rawBoxes[i];
+        if (!a) continue;
+        if (!GROUP_TYPES.has(bytes[recs[i] + 2])) continue;
+        let uTop = Infinity, uLeft = Infinity, uBot = -Infinity, uRgt = -Infinity, n = 0;
+        for (let j = 0; j < rawBoxes.length; j++) {
+            if (i === j) continue;
+            const b = rawBoxes[j];
+            if (!b) continue;
+            if (b.top >= a.top && b.left >= a.left && b.bot <= a.bot && b.rgt <= a.rgt) {
+                uTop = Math.min(uTop, b.top); uLeft = Math.min(uLeft, b.left);
+                uBot = Math.max(uBot, b.bot); uRgt = Math.max(uRgt, b.rgt);
+                n++;
+            }
+        }
+        const tol = 1.0;
+        if (n >= 2 &&
+            Math.abs(uTop - a.top) < tol && Math.abs(uLeft - a.left) < tol &&
+            Math.abs(uBot - a.bot) < tol && Math.abs(uRgt - a.rgt) < tol) {
+            groupContainerIdxs.add(i);
+        }
+    }
+
+    // Assign direct children to each group, processing smallest groups first so that
+    // nested group containers are claimed before the outer group reaches them.
+    const groupChildMap = new Map(); // group_ri → [child_ri, ...]
+    const claimed = new Set();
+    const sortedGroups = [...groupContainerIdxs].sort((a, b) => {
+        const ba = rawBoxes[a], bb = rawBoxes[b];
+        return (ba.rgt - ba.left) * (ba.bot - ba.top) - (bb.rgt - bb.left) * (bb.bot - bb.top);
+    });
+    for (const gi of sortedGroups) {
+        const a = rawBoxes[gi];
+        const children = [];
+        for (let j = 0; j < rawBoxes.length; j++) {
+            if (j === gi || claimed.has(j)) continue;
+            const b = rawBoxes[j];
+            if (!b) continue;
+            if (b.top >= a.top && b.left >= a.left && b.bot <= a.bot && b.rgt <= a.rgt)
+                children.push(j);
+        }
+        groupChildMap.set(gi, children);
+        for (const ci of children) claimed.add(ci);
+    }
+
+    const buildGroup = (gi) => {
+        const childShapes = [];
+        for (const ci of groupChildMap.get(gi) || []) {
+            const co = recs[ci];
+            let s;
+            if (groupContainerIdxs.has(ci)) {
+                s = buildGroup(ci);
+            } else {
+                s = parseMacDrawRecord(view, bytes, co, bytes[co+2], bytes[co+3], scale, pageOffPtX, pageOffPtY, recs[ci+1] - co);
+            }
+            if (s) childShapes.push(s);
+        }
+        return childShapes.length > 0 ? new GroupShape(childShapes) : null;
+    };
+
+    for (let ri = 0; ri < recs.length - 1; ri++) {
+        const o = recs[ri];
+        if (recs[ri+1] - o < 20 || claimed.has(ri)) continue;
+        let shape;
+        if (groupContainerIdxs.has(ri)) {
+            const gcAttr = Array.from({length: 28}, (_, k) => (bytes[o + 20 + k] ?? 0).toString(16).padStart(2, '0')).join(' ');
+            console.log(`MDraw GROUP type=0x${bytes[o+2].toString(16).padStart(2,'0')} flags=0x${bytes[o+3].toString(16).padStart(2,'0')} len=${recs[ri+1]-o}  attr[+20..+47]: ${gcAttr}`);
+            shape = buildGroup(ri);
+        } else {
+            shape = parseMacDrawRecord(view, bytes, o, bytes[o+2], bytes[o+3], scale, pageOffPtX, pageOffPtY, recs[ri+1] - o);
+        }
         if (shape) shapes.push(shape);
     }
 
@@ -466,16 +641,19 @@ function parseMacDrawText(view, bytes, scale) {
 }
 
 // MacDraw II DRWG format: 512-byte header + 4-byte section marker at 0x200 → records from 0x204.
-// The first record always starts with 02 03.
+// Records always start at 0x204 regardless of the marker byte at that position.
 function findMacDrawObjects(bytes) {
-    if (bytes.length >= 0x208 &&
-        bytes[0] === 0x44 && bytes[1] === 0x52 && bytes[2] === 0x57 && bytes[3] === 0x47 &&
-        bytes[0x204] === 0x02 && bytes[0x205] === 0x03 && bytes[0x206] < 0x20) {
+    const isDRWG = bytes.length >= 0x208 &&
+        bytes[0] === 0x44 && bytes[1] === 0x52 && bytes[2] === 0x57 && bytes[3] === 0x47;
+
+    if (isDRWG) {
+        const d = Array.from({length: Math.min(20, bytes.length - 0x204)}, (_, k) => bytes[0x204+k].toString(16).padStart(2,'0')).join(' ');
+        console.log(`MDraw DRWG file. bytes[0x204..]: ${d}`);
         return 0x204;
     }
-    // Fallback scan for the first 02 03 [type < 0x20] beyond any header
+    // Non-DRWG fallback scan
     for (let i = 4; i < Math.min(bytes.length - 3, 2048); i++) {
-        if (bytes[i] === 0x02 && bytes[i+1] === 0x03 && bytes[i+2] < 0x20) return i;
+        if (bytes[i] >= 0x02 && bytes[i+1] === 0x03 && bytes[i+2] < 0x20) return i;
     }
     return -1;
 }
@@ -486,43 +664,141 @@ function readFixed(view, offset) {
     return view.getInt16(offset, false) + view.getUint16(offset + 2, false) / 65536;
 }
 
-function parseMacDrawRecord(view, bytes, o, type, flags, scale) {
+function parseMacDrawRecord(view, bytes, o, type, flags, scale, pageOffPtX = 0, pageOffPtY = 0, recLen = 24) {
     if (o + 20 > bytes.length) return null;
 
     const top  = readFixed(view, o + 4);
     const left = readFixed(view, o + 8);
-    const bot  = readFixed(view, o + 12);
-    const rgt  = readFixed(view, o + 16);
+    const h_pt = readFixed(view, o + 12);  // old format: relative height; new format: absolute bottom
+    const w_pt = readFixed(view, o + 16);  // old format: relative width;  new format: absolute right
 
-    const x = Math.round(left * scale);
-    const y = Math.round(top  * scale);
-    const w = Math.round((rgt - left) * scale);
-    const h = Math.round((bot - top)  * scale);
+    // Arc full-oval bboxes can have negative left/top when the visible quadrant starts
+    // at the canvas edge (e.g. a Q0 arc at x=0 has full oval left = cx - rx < 0).
+    // Reshape arcs (marker=0x05, type=0x02) follow the same absolute-bbox convention.
+    const _isArcRec = recLen >= 28 && flags === 0x00 &&
+        (type === 0x01 || (type === 0x02 && bytes[o + 1] === 0x05));
+    if (_isArcRec ? (top < -500 || left < -500) : (top < 0 || left < 0)) return null;
+
+    // Lines have exactly zero fractional parts in all four Fixed16.16 fields.
+    // Must be detected early — before the w/h null check — because reverse-direction
+    // lines have w_pt < left, which makes (w_pt - left) negative.
+    // Only applies to flags=0 records; flags!=0 encodes shape class (e.g. roundrect).
+    if (flags === 0 && type === 0x02 && bytes[o + 1] !== 0x05 &&
+        !(bytes[o+6]|bytes[o+7]|bytes[o+10]|bytes[o+11]|
+          bytes[o+14]|bytes[o+15]|bytes[o+18]|bytes[o+19])) {
+        const lx1 = Math.round((left - pageOffPtX) * scale);
+        const ly1 = Math.round((top  - pageOffPtY) * scale);
+        const lx2 = Math.round((w_pt - pageOffPtX) * scale);
+        const ly2 = Math.round((h_pt - pageOffPtY) * scale);
+        const s = new LineShape(lx1, ly1, lx2, ly2);
+        s.strokeWidth = Math.max(1, bytes[o] - 1);
+        return s;
+    }
+
+    const x = Math.round((left - pageOffPtX) * scale);
+    const y = Math.round((top  - pageOffPtY) * scale);
+    const w = Math.round((w_pt - left) * scale);
+    const h = Math.round((h_pt - top)  * scale);
 
     if (w <= 0 || h <= 0 || x < -200 || y < -200 || x > 5000 || y > 5000 || w > 5000 || h > 5000) return null;
-    // Require meaningful page coordinates — rejects false-positives whose bbox bytes encode
-    // non-coordinate data with near-zero fractional Fixed16.16 top/left values.
-    if (top < 5 || left < 5) return null;
+
+    if (flags === 0 && !_isArcRec && top < 5) return null;
+
+    // byte[0] encodes pen width: 0x02 = 1pt, 0x03 = 2pt, etc.
+    // attr[0] = fill pattern index (1 byte), but at o+24 for 28-byte arc records.
+    const fillIdx    = bytes[o + 20] ?? 0;
+    const strokeWidth = Math.max(1, bytes[o] - 1);
+    const bboxHex = Array.from({length: 16}, (_, k) => bytes[o + 4 + k].toString(16).padStart(2,'0')).join(' ');
+    console.log(`MDraw type=0x${type.toString(16).padStart(2,'0')} flags=0x${flags.toString(16).padStart(2,'0')} (${x},${y}) ${w}×${h}  fill=${fillIdx} pen=${strokeWidth} len=${recLen}  bbox: ${bboxHex}`);
+
+    // When flags byte (o+3) is non-zero it encodes the SHAPE CLASS;
+    // the type byte (o+2) is the FILL VARIANT within that class.
+    if (flags !== 0) {
+        if (flags === 0x03) { // roundrect with fill variant in type
+            const s = new RoundRectShape(x, y, w, h);
+            s.cornerRadius = Math.round(10 * scale);
+            // 0x01=transparent, 0x02=white, 0x03=grey (grå); attr[0] unreliable for thick pen
+            s.fillIdx = type === 0x01 ? 0 : type === 0x02 ? 1 : 5;
+            s.strokeWidth = strokeWidth;
+            s.strokePatternIdx = bytes[o + 1]; // byte[1] encodes pen pattern index
+            return s;
+        }
+        console.log(`MDraw: unknown flags=0x${flags.toString(16).padStart(2,'0')} — skipped`);
+        return null;
+    }
 
     switch (type) {
-    case 0x02: { // RECT — no fill, just border
-        const s = new RectangleShape(x, y, w, h);
-        s.fillIdx = 0; s.strokeWidth = 1;
+    case 0x01: { // ARC (28 bytes: bbox=absolute, angles at o+20/22) or OVAL (24 bytes)
+        if (recLen >= 28 && o + 28 <= bytes.length) {
+            // Arc bbox is stored as absolute (top, left, BOTTOM, RIGHT) — compute from that
+            const arc_w = Math.round((w_pt - left) * scale) + 1;
+            const arc_h = Math.round((h_pt - top)  * scale) + 1;
+            if (arc_w <= 0 || arc_h <= 0) return null;
+            const startAngle = view.getInt16(o + 20, false);
+            const arcAngle   = view.getInt16(o + 22, false);
+            const mid = ((startAngle + arcAngle / 2) % 360 + 360) % 360;
+            const quadrant = Math.min(3, Math.floor(mid / 90));
+            console.log(`MDraw ARC start=${startAngle} arc=${arcAngle} → Q${quadrant}  (${x},${y}) ${arc_w}×${arc_h}`);
+            const s = new ArcShape(x, y, arc_w, arc_h);
+            s.quadrant = quadrant;
+            s.fillIdx = 0; // frame arc — stroke only
+            s.strokeWidth = strokeWidth;
+            return s;
+        }
+        const s = new EllipseShape(x, y, w + 1, h + 1);
+        s.fillIdx = fillIdx; s.strokeWidth = strokeWidth;
         return s;
     }
-    case 0x04: // OVAL — diagonal medium-dark fill
-    case 0x11: { // OVAL variant — same fill
+    case 0x04: // group type — should be filtered before here; fallback to oval
+    case 0x0F: // OVAL
+    case 0x11: { // group type — should be filtered before here; fallback to oval
         const s = new EllipseShape(x, y, w, h);
-        s.fillIdx = 14; // QD_PATTERNS[14] = 'diag ↘↘' (diagonal lines, medium-dark)
-        s.strokeWidth = 1;
+        s.fillIdx = fillIdx; s.strokeWidth = strokeWidth;
         return s;
     }
-    case 0x0F: { // Small rect with light line fill
+    case 0x02: {
+        // Reshape arc: same 28-byte absolute-bbox format as standard arcs,
+        // but marker byte is 0x05 instead of 0x03.
+        if (bytes[o + 1] === 0x05 && recLen >= 28 && o + 28 <= bytes.length) {
+            const arc_w = Math.round((w_pt - left) * scale) + 1;
+            const arc_h = Math.round((h_pt - top)  * scale) + 1;
+            if (arc_w <= 0 || arc_h <= 0) return null;
+            const startAngleDeg = view.getInt16(o + 20, false);
+            const arcAngleDeg   = view.getInt16(o + 22, false);
+            const mid = ((startAngleDeg + arcAngleDeg / 2) % 360 + 360) % 360;
+            const quadrant = Math.min(3, Math.floor(mid / 90));
+            const reshapeFill   = bytes[o + 24] ?? 0;
+            const reshapeStroke = bytes[o + 1]; // marker byte doubles as pen pattern index
+            console.log(`MDraw RESHAPE ARC start=${startAngleDeg} arc=${arcAngleDeg} → Q${quadrant} (${x},${y}) ${arc_w}×${arc_h} fill=${reshapeFill} strokePat=${reshapeStroke}`);
+            const s = new ArcShape(x, y, arc_w, arc_h);
+            s.quadrant = quadrant;
+            s.startAngleDeg = startAngleDeg;
+            s.arcAngleDeg   = arcAngleDeg;
+            // MacDraw fill 0 = white pattern (QD pattern 0 = no ink = paper = white);
+            // our index 0 is transparent, index 1 is white — so offset by 1.
+            s.fillIdx        = reshapeFill + 1;
+            s.strokePatternIdx = reshapeStroke; // 0x05 → patterns[5] = 'grå' (50% grey)
+            s.strokeWidth    = strokeWidth;
+            return s;
+        }
         const s = new RectangleShape(x, y, w, h);
-        s.fillIdx = 20; // QD_PATTERNS[20] = 'h-gles' (light horizontal lines)
-        s.strokeWidth = 1;
+        s.fillIdx = fillIdx;
+        s.strokeWidth = strokeWidth;
         return s;
     }
-    default: return null;
+    case 0x03: { // ROUND RECT (flags=0x00 old encoding)
+        const s = new RoundRectShape(x, y, w, h);
+        s.cornerRadius = 10;
+        s.fillIdx = fillIdx; s.strokeWidth = strokeWidth;
+        return s;
+    }
+    case 0x05: { // OVAL variant (solid/filled oval in some MacDraw II files)
+        const s = new EllipseShape(x, y, w, h);
+        s.fillIdx = fillIdx; s.strokeWidth = strokeWidth;
+        return s;
+    }
+    default:
+        console.log(`MDraw: unknown type=0x${type.toString(16).padStart(2,'0')} — skipped`);
+        return null;
     }
 }

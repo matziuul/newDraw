@@ -108,6 +108,15 @@ export function hitTestHandle(px, py, bounds) {
     return null;
 }
 
+// Returns 0 (start handle), 1 (end handle), or null.
+export function hitTestArcHandle(px, py, shape) {
+    const pts = shape.getArcHandlePositions();
+    for (let i = 0; i < pts.length; i++) {
+        if (Math.hypot(px - pts[i].x, py - pts[i].y) <= HS + 2) return i;
+    }
+    return null;
+}
+
 export function hitTestBezierHandle(px, py, shape) {
     const CR = 6; // hit radius for control-point circles
     for (let i = 0; i < shape.points.length; i++) {
@@ -397,7 +406,13 @@ export class RoundRectShape {
     }
 }
 
-function _arcEllipse(path, cx, cy, rx, ry, quadrant) {
+function _arcEllipse(path, cx, cy, rx, ry, quadrant, startAngleDeg, arcAngleDeg) {
+    if (startAngleDeg !== undefined && arcAngleDeg !== undefined) {
+        // Mac convention: 0° = 12 o'clock, clockwise. Canvas: 0 = 3 o'clock, CW with anticlockwise=false.
+        const s = startAngleDeg * Math.PI / 180 - Math.PI / 2;
+        path.ellipse(cx, cy, rx, ry, 0, s, s + arcAngleDeg * Math.PI / 180, false);
+        return;
+    }
     switch (quadrant) {
         case 0: path.ellipse(cx, cy, rx, ry, 0, -Math.PI / 2,      0,           false); break; // top → right
         case 1: path.ellipse(cx, cy, rx, ry, 0,  0,                Math.PI / 2, false); break; // right → bottom
@@ -416,15 +431,36 @@ export class ArcShape {
         this.id = nextUid(); this.type = 'arc';
         this.x = x; this.y = y; this.width = w; this.height = h;
         this.quadrant = 1; // default: bottom-right
+        this.startAngleDeg = undefined; // set for reshape arcs (arbitrary angle span)
+        this.arcAngleDeg   = undefined;
         this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
     }
 
     getBounds() { return normalize(this.x, this.y, this.width, this.height); }
 
-    // Returns the bounding box of the visible arc quadrant (not the full ellipse).
+    // Returns the bounding box of the visible arc (quadrant or arbitrary angle).
     getSelectionBounds() {
         const { x, y, width: w, height: h } = normalize(this.x, this.y, this.width, this.height);
         const rx = w / 2, ry = h / 2, cx = x + rx, cy = y + ry;
+        if (this.startAngleDeg !== undefined && this.arcAngleDeg !== undefined) {
+            const sa = this.startAngleDeg, ea = sa + this.arcAngleDeg;
+            const pts = [];
+            for (const deg of [sa, ea]) {
+                const r = deg * Math.PI / 180 - Math.PI / 2;
+                pts.push({ x: cx + rx * Math.cos(r), y: cy + ry * Math.sin(r) });
+            }
+            for (const card of [0, 90, 180, 270, 360]) {
+                if (card > sa && card < ea) {
+                    const r = card * Math.PI / 180 - Math.PI / 2;
+                    pts.push({ x: cx + rx * Math.cos(r), y: cy + ry * Math.sin(r) });
+                }
+            }
+            const minX = Math.min(...pts.map(p => p.x));
+            const maxX = Math.max(...pts.map(p => p.x));
+            const minY = Math.min(...pts.map(p => p.y));
+            const maxY = Math.max(...pts.map(p => p.y));
+            return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+        }
         switch (this.quadrant) {
             case 0: return { x: cx, y,       width: rx, height: ry };
             case 1: return { x: cx, y: cy,   width: rx, height: ry };
@@ -439,7 +475,7 @@ export class ArcShape {
         const cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
         const p = new Path2D();
         p.moveTo(cx, cy);
-        _arcEllipse(p, cx, cy, rx, ry, this.quadrant);
+        _arcEllipse(p, cx, cy, rx, ry, this.quadrant, this.startAngleDeg, this.arcAngleDeg);
         p.closePath();
         return p;
     }
@@ -448,7 +484,7 @@ export class ArcShape {
     _makeStrokePath(x, y, w, h) {
         const cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
         const p = new Path2D();
-        _arcEllipse(p, cx, cy, rx, ry, this.quadrant);
+        _arcEllipse(p, cx, cy, rx, ry, this.quadrant, this.startAngleDeg, this.arcAngleDeg);
         return p;
     }
 
@@ -458,9 +494,23 @@ export class ArcShape {
         return getScratchCtx().isPointInPath(this._makeFillPath(x, y, width, height), px, py);
     }
 
+    // Returns [{x,y}, {x,y}] — screen positions of the arc's start and end handles.
+    getArcHandlePositions() {
+        const { x, y, width: w, height: h } = this.getBounds();
+        const cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
+        const startDeg = this.startAngleDeg ?? [0, 90, 180, 270][this.quadrant ?? 1];
+        const arcDeg   = this.arcAngleDeg  ?? 90;
+        return [startDeg, startDeg + arcDeg].map(deg => {
+            const r = deg * Math.PI / 180 - Math.PI / 2;
+            return { x: cx + rx * Math.cos(r), y: cy + ry * Math.sin(r) };
+        });
+    }
+
     clone() {
         const s = new ArcShape(this.x, this.y, this.width, this.height);
-        s.id = this.id; s.quadrant = this.quadrant; s.fillIdx = this.fillIdx;
+        s.id = this.id; s.quadrant = this.quadrant;
+        s.startAngleDeg = this.startAngleDeg; s.arcAngleDeg = this.arcAngleDeg;
+        s.fillIdx = this.fillIdx;
         s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash;
         s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
         return s;

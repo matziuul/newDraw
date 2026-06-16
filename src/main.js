@@ -1,4 +1,4 @@
-import { AppState } from './state.js';
+import { AppState, PX_PER_MM } from './state.js';
 import { Renderer } from './renderer.js';
 import { History } from './history.js';
 import { Ruler } from './ruler.js';
@@ -26,6 +26,89 @@ const inspector      = new Inspector(state, renderer, history);
 const toolController = new ToolController(state, renderer, history, ruler, canvas, toolbar, textInput);
 toolController.inspector = inspector;
 new GridControls(state, renderer, ruler);
+
+// ── Canvas resize ─────────────────────────────────────────────────────────────
+
+const PAPER_SIZES = {
+    a4p: { w: 794,  h: 1123 },
+    a4l: { w: 1123, h: 794  },
+    ltp: { w: 816,  h: 1056 },
+    ltl: { w: 1056, h: 816  },
+};
+
+const rulerH  = document.getElementById('rulerH');
+const rulerV  = document.getElementById('rulerV');
+const docWrap = document.querySelector('.doc-wrap');
+const docDiv  = document.querySelector('.document');
+
+function resizeCanvas(w, h) {
+    canvas.width  = w;
+    canvas.height = h;
+    rulerH.width  = w;
+    rulerH.style.width = `${w}px`;
+    rulerV.height = h;
+    rulerV.style.height = `${h}px`;
+    docWrap.style.gridTemplateColumns = `20px ${w}px`;
+    docWrap.style.gridTemplateRows    = `20px ${h}px`;
+    docWrap.style.width = `${w + 20}px`;
+    docDiv.style.width  = `${w}px`;
+    docDiv.style.height = `${h}px`;
+    ruler.rebuild();
+    renderer.render();
+}
+
+function setupCanvasSizeDialog() {
+    const dlg       = document.getElementById('canvasSizeDialog');
+    const selPreset = document.getElementById('dlgPreset');
+    const inpW      = document.getElementById('dlgW');
+    const inpH      = document.getElementById('dlgH');
+    const spanWmm   = document.getElementById('dlgWmm');
+    const spanHmm   = document.getElementById('dlgHmm');
+    const selMark   = document.getElementById('dlgMarkers');
+    const btnCancel = document.getElementById('dlgCancel');
+    const btnApply  = document.getElementById('dlgApply');
+
+    const toMm = px => (px / PX_PER_MM).toFixed(1) + ' mm';
+    const updateMm = () => {
+        spanWmm.textContent = toMm(+inpW.value || 0);
+        spanHmm.textContent = toMm(+inpH.value || 0);
+    };
+
+    selPreset.addEventListener('change', () => {
+        const ps = PAPER_SIZES[selPreset.value];
+        if (ps) { inpW.value = ps.w; inpH.value = ps.h; }
+        updateMm();
+    });
+
+    inpW.addEventListener('input', () => { selPreset.value = ''; updateMm(); });
+    inpH.addEventListener('input', () => { selPreset.value = ''; updateMm(); });
+
+    btnCancel.addEventListener('click', () => dlg.close());
+
+    btnApply.addEventListener('click', () => {
+        const w = Math.max(100, Math.min(9999, Math.round(+inpW.value) || 800));
+        const h = Math.max(100, Math.min(9999, Math.round(+inpH.value) || 600));
+        resizeCanvas(w, h);
+        const ps = PAPER_SIZES[selMark.value];
+        state.pageW = ps ? ps.w : null;
+        state.pageH = ps ? ps.h : null;
+        renderer.render();
+        dlg.close();
+    });
+
+    return () => {
+        inpW.value = canvas.width;
+        inpH.value = canvas.height;
+        selPreset.value = '';
+        const curKey = Object.keys(PAPER_SIZES).find(k =>
+            PAPER_SIZES[k].w === state.pageW && PAPER_SIZES[k].h === state.pageH);
+        selMark.value = curKey ?? '';
+        updateMm();
+        dlg.showModal();
+    };
+}
+
+const openCanvasSizeDialog = setupCanvasSizeDialog();
 
 // ── File I/O ──────────────────────────────────────────────────────────────────
 
@@ -71,10 +154,12 @@ docInput.addEventListener('change', async () => {
 
     try {
         const result = loadDocument(buffer);
-        state.shapes     = result.shapes;
+        state.shapes      = result.shapes;
         state.selectedId  = null;
         state.selectedIds = [];
         history.reset();
+        if (result.canvasWidth && result.canvasHeight)
+            resizeCanvas(result.canvasWidth, result.canvasHeight);
         toolController.syncUI();
         elTool.textContent = `Opened ${result.shapes.length} shapes`;
     } catch (err) {
@@ -86,7 +171,7 @@ const saveDoc = () => saveDocument(state.shapes, canvas.width, canvas.height);
 
 // ── Menu system ───────────────────────────────────────────────────────────────
 
-new MenuSystem({ state, history, renderer, canvas, importInput, docInput, saveDoc, toolController });
+new MenuSystem({ state, history, renderer, canvas, importInput, docInput, saveDoc, toolController, onCanvasSize: openCanvasSizeDialog });
 
 // ── Ruler origin drag (click-and-drag on the corner square) ───────────────────
 

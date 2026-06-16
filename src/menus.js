@@ -11,6 +11,8 @@ const MENUS = [
         '-',
         { label: 'Save…',        kbd: '⌘S', action: 'save'        },
         '-',
+        { label: 'Canvas Size…',             action: 'canvasSize'  },
+        '-',
         { label: 'Print…',       kbd: '⌘P', action: 'print'       },
     ]},
     { id: 'edit', label: 'Edit', items: [
@@ -48,7 +50,7 @@ const MENUS = [
 ];
 
 export class MenuSystem {
-    constructor({ state, history, renderer, canvas, importInput, docInput, saveDoc, toolController }) {
+    constructor({ state, history, renderer, canvas, importInput, docInput, saveDoc, toolController, onCanvasSize }) {
         this.state    = state;
         this.history  = history;
         this.renderer = renderer;
@@ -57,6 +59,7 @@ export class MenuSystem {
         this.docInput    = docInput;
         this.saveDoc     = saveDoc;
         this.tc = toolController;
+        this.onCanvasSize = onCanvasSize;
 
         this._open = null;
         this._build();
@@ -316,6 +319,7 @@ export class MenuSystem {
             case 'open':       this.docInput.click(); return;
             case 'importPict': this.importInput.click(); return;
             case 'save':       this.saveDoc(); return;
+            case 'canvasSize': this.onCanvasSize?.(); return;
             case 'print':      printDrawing(state.shapes, this.canvas.width, this.canvas.height); return;
 
             // Edit (mirrors logic in ToolController._onKey; syncUI() updates status + toolbar)

@@ -29,11 +29,14 @@ export class Inspector {
     }
 
     _toPx(v) {
-        return this.state.rulerUnit === 'mm' ? v * 96 / 25.4 : v;
+        if (this.state.rulerUnit === 'mm') return v * 96 / 25.4;
+        if (this.state.rulerUnit === 'in') return v * 96;
+        return v;
     }
 
     _toDisplay(px) {
         if (this.state.rulerUnit === 'mm') return +(px * 25.4 / 96).toFixed(2);
+        if (this.state.rulerUnit === 'in') return +(px / 96).toFixed(3);
         return Math.round(px);
     }
 
@@ -85,10 +88,10 @@ export class Inspector {
     sync() {
         const sel   = this.state.selectedShape;
         const multi = this.state.selectedIds.length > 1;
-        const isMm  = this.state.rulerUnit === 'mm';
-        const step  = isMm ? '0.01' : '1';
+        const unit = this.state.rulerUnit;
+        const step = unit === 'mm' ? '0.01' : unit === 'in' ? '0.001' : '1';
 
-        this.elUnit.textContent = isMm ? 'mm' : 'px';
+        this.elUnit.textContent = unit;
         [this.elX, this.elY, this.elW, this.elH].forEach(el => el.step = step);
 
         if (!sel && !multi) {

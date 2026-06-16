@@ -14,6 +14,7 @@ export class Renderer {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         if (state.showGrid) this._drawGrid();
+        if (state.pageW && state.pageH) this._drawPageMarkers();
 
         // Origin crosshair and drag preview
         const originX = state.rulerDragOrigin ? state.rulerDragOrigin.x : state.rulerOriginX;
@@ -190,6 +191,25 @@ export class Renderer {
             ctx.strokeStyle = locked ? '#666' : 'black'; ctx.lineWidth = 1;
             ctx.strokeRect(h.x - HS + 0.5, h.y - HS + 0.5, HS*2 - 1, HS*2 - 1);
         }
+
+        // Arc endpoint handles for reshape dragging
+        if (shape.type === 'arc' && !locked) {
+            const hov  = this.state.hoveredArcHandle;
+            const drag = this.state.dragArcHandle;
+            for (const [i, pt] of shape.getArcHandlePositions().entries()) {
+                const active = hov === i || drag === i;
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, active ? 6 : 4, 0, Math.PI * 2);
+                if (active) {
+                    ctx.fillStyle = 'white'; ctx.fill();
+                    ctx.strokeStyle = '#0044dd'; ctx.lineWidth = 1.5; ctx.stroke();
+                } else {
+                    ctx.fillStyle = '#0055ff'; ctx.strokeStyle = '#003bbf';
+                    ctx.lineWidth = 1; ctx.fill(); ctx.stroke();
+                }
+            }
+        }
+
         ctx.restore();
     }
 
@@ -262,6 +282,26 @@ export class Renderer {
             }
             ctx.strokeRect(p.x - HS + 0.5, p.y - HS + 0.5, HS*2 - 1, HS*2 - 1);
         }
+        ctx.restore();
+    }
+
+    _drawPageMarkers() {
+        const { ctx, canvas, state } = this;
+        const pw = state.pageW, ph = state.pageH;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 100, 215, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([8, 5]);
+        ctx.beginPath();
+        for (let y = ph; y < canvas.height; y += ph) {
+            const py = Math.round(y) + 0.5;
+            ctx.moveTo(0, py); ctx.lineTo(canvas.width, py);
+        }
+        for (let x = pw; x < canvas.width; x += pw) {
+            const px = Math.round(x) + 0.5;
+            ctx.moveTo(px, 0); ctx.lineTo(px, canvas.height);
+        }
+        ctx.stroke();
         ctx.restore();
     }
 
