@@ -9,6 +9,7 @@ import { MenuSystem } from './menus.js';
 import { importMacFile } from './import.js';
 import { Inspector } from './inspector.js';
 import { saveDocument, loadDocument } from './document.js';
+import { DebugPanel } from './debug-panel.js';
 
 const canvas   = document.getElementById('drawingCanvas');
 const state    = new AppState();
@@ -26,6 +27,13 @@ const inspector      = new Inspector(state, renderer, history);
 const toolController = new ToolController(state, renderer, history, ruler, canvas, toolbar, textInput);
 toolController.inspector = inspector;
 new GridControls(state, renderer, ruler);
+const debugPanel = new DebugPanel(state, renderer);
+
+// Sync debug panel highlight after every render
+const _origRender = renderer.render.bind(renderer);
+renderer.render = () => { _origRender(); debugPanel.syncSelection(); };
+
+document.getElementById('dbgToggle').addEventListener('click', () => debugPanel.toggle());
 
 // ── Canvas resize ─────────────────────────────────────────────────────────────
 
@@ -132,11 +140,17 @@ importInput.addEventListener('change', async () => {
             elTool.textContent = `Import: no shapes found in ${result.format} file.`;
             return;
         }
+        if (result.canvasWidth && result.canvasHeight)
+            resizeCanvas(result.canvasWidth, result.canvasHeight);
         const snap = history.savePreOp();
         for (const s of result.shapes) state.shapes.push(s);
         history.commit(snap);
         renderer.render();
-        elTool.textContent = `Imported ${result.shapes.length} shapes (${result.format})`;
+        const sizeInfo = result.canvasWidth
+            ? `  (canvas ${result.canvasWidth}×${result.canvasHeight}px)`
+            : '';
+        elTool.textContent = `Imported ${result.shapes.length} shapes (${result.format})${sizeInfo}`;
+        debugPanel.populate(result.shapes);
     } catch (err) {
         elTool.textContent = `Import failed: ${err.message}`;
     }

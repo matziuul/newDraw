@@ -427,9 +427,11 @@ export class ToolController {
         } else if (this.dragMode === 'move') {
             const shape = this.state.selectedShape, orig = this.originShape;
             if (!shape || !orig) return;
+            // dx/dy are already snapped deltas (diff of two _snapPos'd positions), so
+            // adding them directly to the origin preserves off-grid offsets correctly.
             if (shape.type === 'line') {
-                shape.x1 = this._snapVal(orig.x1 + dx); shape.y1 = this._snapVal(orig.y1 + dy);
-                shape.x2 = this._snapVal(orig.x2 + dx); shape.y2 = this._snapVal(orig.y2 + dy);
+                shape.x1 = orig.x1 + dx; shape.y1 = orig.y1 + dy;
+                shape.x2 = orig.x2 + dx; shape.y2 = orig.y2 + dy;
             } else if (shape.type === 'bezier') {
                 for (let i = 0; i < shape.points.length; i++) {
                     const op = orig.points[i];
@@ -438,14 +440,10 @@ export class ToolController {
                     shape.points[i].c2x = op.c2x + dx; shape.points[i].c2y = op.c2y + dy;
                 }
             } else if (shape.type === 'group') {
-                // Snap the group's top-left corner and derive delta from there
-                const ob = orig.getBounds();
-                const sdx = this._snapVal(ob.x + dx) - ob.x;
-                const sdy = this._snapVal(ob.y + dy) - ob.y;
                 for (let i = 0; i < shape.children.length; i++)
-                    applyMoveFromOrigin(shape.children[i], orig.children[i], sdx, sdy);
+                    applyMoveFromOrigin(shape.children[i], orig.children[i], dx, dy);
             } else {
-                shape.x = this._snapVal(orig.x + dx); shape.y = this._snapVal(orig.y + dy);
+                shape.x = orig.x + dx; shape.y = orig.y + dy;
             }
 
         } else if (this.dragMode === 'moveMany') {

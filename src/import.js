@@ -6,9 +6,47 @@ import { QD_PATTERNS } from './patterns.js';
 export function importMacFile(buffer) {
     const bytes = new Uint8Array(buffer);
     const fmt = detectFormat(bytes);
-    if (fmt === 'pict')    return { shapes: parsePict(buffer, bytes),    format: 'PICT' };
-    if (fmt === 'macdraw') return { shapes: parseMacDraw(buffer, bytes), format: 'MacDraw II' };
+    if (fmt === 'pict') {
+        const canvas = readPictCanvas(bytes);
+        return { shapes: parsePict(buffer, bytes), format: 'PICT', ...canvas };
+    }
+    if (fmt === 'macdraw') {
+        const canvas = readMacDrawCanvas(bytes);
+        return { shapes: parseMacDraw(buffer, bytes), format: 'MacDraw II', ...canvas };
+    }
     throw new Error('Unrecognized format — expected a PICT (.pict) or MacDraw II (.drw) file.');
+}
+
+// Canvas size is stored in 72-dpi QuickDraw points; scale to 96-dpi canvas pixels.
+function ptsToCanvasSize(wPts, hPts) {
+    const s = 96 / 72;
+    return { canvasWidth: Math.round(wPts * s), canvasHeight: Math.round(hPts * s) };
+}
+
+function readMacDrawCanvas(bytes) {
+    // DRW header: int16 BE at 0xA6 = page height in pts, 0xA8 = page width in pts.
+    if (bytes.length < 0xAB) return {};
+    const view = new DataView(bytes.buffer, bytes.byteOffset);
+    const hPts = view.getUint16(0xA6, false);
+    const wPts = view.getUint16(0xA8, false);
+    if (wPts < 10 || hPts < 10) return {};
+    return ptsToCanvasSize(wPts, hPts);
+}
+
+function readPictCanvas(bytes) {
+    // PICT boundrect: picSize(2) + rect(8) starting at hdrSize+0.
+    // boundrect right = width, bottom = height, all in 72-dpi pts.
+    const hdrSize = isPictVersionAt(bytes, 512) ? 512 : 0;
+    if (bytes.length < hdrSize + 10) return {};
+    const view = new DataView(bytes.buffer, bytes.byteOffset);
+    const o = hdrSize + 2; // skip picSize
+    const top  = view.getInt16(o,     false);
+    const left = view.getInt16(o + 2, false);
+    const bot  = view.getInt16(o + 4, false);
+    const rgt  = view.getInt16(o + 6, false);
+    const wPts = rgt - left, hPts = bot - top;
+    if (wPts < 10 || hPts < 10) return {};
+    return ptsToCanvasSize(wPts, hPts);
 }
 
 // ─── Format detection ─────────────────────────────────────────────────────────
@@ -110,6 +148,7 @@ function mergeConsecutiveLines(shapes) {
             b.strokeWidth = s.strokeWidth;
             b.strokePatternIdx = s.strokePatternIdx;
             b.fillIdx = 0;
+            b.debugSource = s.debugSource;
             result.push(b);
             i = j;
         } else { result.push(s); i++; }
@@ -203,19 +242,27 @@ class PictParser {
 
     runV1() {
         while (this.o < this.b.length) {
+            const opOff = this.o;
             const op = this.u8();
             if (op === 0xFF) break;
+            const prevLen = this.shapes.length;
             this.op(op);
+            for (let i = prevLen; i < this.shapes.length; i++)
+                this.shapes[i].debugSource = { format: 'PICT', offset: opOff, opcode: op };
         }
     }
 
     runV2() {
         while (this.o < this.b.length) {
             this.align();
+            const opOff = this.o;
             const op = this.u16();
             if (op === 0x00FF) break;
+            const prevLen = this.shapes.length;
             if (op <= 0xFF)  this.op(op);
             else             this.skipReservedV2(op);
+            for (let i = prevLen; i < this.shapes.length; i++)
+                this.shapes[i].debugSource = { format: 'PICT', offset: opOff, opcode: op };
         }
     }
 
@@ -475,7 +522,7 @@ function parseMacDraw(buffer, bytes) {
         recs.push(startOffset);
     }
     for (let i = startOffset; i < bytes.length - 3; i++) {
-        if (bytes[i] >= 0x02 && bytes[i+1] >= 0x01 && bytes[i+2] < 0x20) {
+        if (bytes[i] >= 0x01 && bytes[i+1] >= 0x01 && bytes[i+2] < 0x20) {
             if (recs.length === 0 || i - recs[recs.length - 1] >= 24) recs.push(i);
         }
     }
@@ -495,12 +542,9 @@ function parseMacDraw(buffer, bytes) {
         if (recs[ri+1] - o < 20 || o + 20 > bytes.length) { rawBoxes.push(null); continue; }
         const _t = readFixed(view, o + 4), _l = readFixed(view, o + 8);
         const _f3 = readFixed(view, o + 12), _f4 = readFixed(view, o + 16);
-        // Lines (type 0x02) store absolute endpoints and always have zero fractional parts.
-        // Rects/ovals have sub-pixel fractions from free-hand drawing.
         const _recLen = recs[ri+1] - o;
-        const _isLine = bytes[o+2]===0x02 &&
-            !(bytes[o+6]|bytes[o+7]|bytes[o+10]|bytes[o+11]|
-              bytes[o+14]|bytes[o+15]|bytes[o+18]|bytes[o+19]);
+        // Reshape arcs have type=0x02 with strokePat=0x05; exclude them from line min/max.
+        const _isLine = bytes[o+2]===0x02 && bytes[o+1]!==0x05;
         // Reshape arcs have marker byte 0x05 instead of 0x03; bbox is still absolute.
         const _isArc = (bytes[o+2]===0x01 || (bytes[o+2]===0x02 && bytes[o+1]===0x05)) && _recLen >= 28;
         if (_isLine) {
@@ -604,9 +648,16 @@ function parseMacDraw(buffer, bytes) {
         const groupByteEnd = childStart + childCount * 24;
         if (groupByteEnd > bytes.length) continue;
 
-        // Validate: first child must have a recognisable header
-        const hp0 = childStart + 4;
-        if (bytes[hp0] < 0x02 || bytes[hp0 + 1] !== 0x03 || bytes[hp0 + 2] >= 0x20) continue;
+        // Validate ALL children have recognisable headers (not just child 0),
+        // to reject false-positive groups where childCount came from arc angle bytes etc.
+        let allValid = true;
+        for (let ci = 0; ci < childCount; ci++) {
+            const hp0 = childStart + ci * 24 + 4;
+            if (hp0 + 4 > bytes.length ||
+                bytes[hp0] < 0x02 || bytes[hp0 + 1] < 0x01 || bytes[hp0 + 2] >= 0x20 ||
+                bytes[hp0] > 0x0a) { allValid = false; break; }
+        }
+        if (!allValid) continue;
 
         const childShapes = [];
         for (let ci = 0; ci < childCount; ci++) {
@@ -619,7 +670,9 @@ function parseMacDraw(buffer, bytes) {
         }
 
         if (childShapes.length > 0) {
-            shapes.push(new GroupShape(childShapes));
+            const g = new GroupShape(childShapes);
+            g.debugSource = { format: 'DRW', offset: o, typeCode: 0x0a };
+            shapes.push(g);
             typedGroupHandled.add(o);
         }
 
@@ -637,15 +690,35 @@ function parseMacDraw(buffer, bytes) {
         const o = recs[ri];
         if (recs[ri+1] - o < 20 || claimed.has(ri)) continue;
         if (typedGroupHandled.has(o)) continue;
+        const shapeTypePre = o >= 4 ? bytes[o - 4] : 0;
         let shape;
         if (groupContainerIdxs.has(ri)) {
             const gcAttr = Array.from({length: 28}, (_, k) => (bytes[o + 20 + k] ?? 0).toString(16).padStart(2, '0')).join(' ');
             console.log(`MDraw GROUP type=0x${bytes[o+2].toString(16).padStart(2,'0')} flags=0x${bytes[o+3].toString(16).padStart(2,'0')} len=${recs[ri+1]-o}  attr[+20..+47]: ${gcAttr}`);
             shape = buildGroup(ri);
+        } else if (shapeTypePre === 0x08) {
+            // Freehand pencil stroke: header at o contains start point at o+28(y) o+32(x);
+            // raw signed-byte (dh,dv) delta pairs follow at o+36, terminated by (0,0).
+            shape = parseFreehandStroke(view, bytes, o, scale);
+            // Claim all scanner-found records that fall inside the delta stream so
+            // they aren't mis-processed as separate shapes.
+            if (shape) {
+                let deltaEnd = o + 36;
+                while (deltaEnd + 1 < bytes.length) {
+                    if (bytes[deltaEnd] === 0 && bytes[deltaEnd + 1] === 0) break;
+                    deltaEnd += 2;
+                }
+                for (let j = ri + 1; j < recs.length - 1; j++) {
+                    if (recs[j] <= deltaEnd) claimed.add(j); else break;
+                }
+            }
         } else {
             shape = parseMacDrawRecord(view, bytes, o, bytes[o+2], bytes[o+3], scale, pageOffPtX, pageOffPtY, recs[ri+1] - o);
         }
-        if (shape) shapes.push(shape);
+        if (shape) {
+            shape.debugSource = { format: 'DRW', offset: o, typeCode: bytes[o+2] };
+            shapes.push(shape);
+        }
     }
 
     // Second pass: extract text objects
@@ -694,8 +767,8 @@ function parseMacDrawText(view, bytes, scale) {
             if (type === 0x01 && flags === 0x01) {
                 if (i + 12 > bytes.length) continue;
                 textOff = 15;
-                y = view.getInt16(i + 8,  true) * scale;
-                x = view.getInt16(i + 10, true) * scale;
+                y = view.getInt16(i + 7,  false) * scale;
+                x = view.getInt16(i + 9,  false) * scale;
             } else if (type === 0x1A) {
                 if (i + 14 > bytes.length) continue;
                 textOff = 19;
@@ -721,18 +794,20 @@ function parseMacDrawText(view, bytes, scale) {
             if (!isPrintableAt(bytes, i + textOff, 3)) continue;
             const text = macDrawReadString(bytes, i + textOff);
             if (!text || text.trim().length < 2) continue;
-            entries.push({ text, x, y });
+            entries.push({ text, x, y, offset: i, typeCode: type });
         }
     }
 
     // Deduplicate by text content (first occurrence — typed inner records — wins)
     const seenText = new Set();
     const shapes = [];
-    for (const { text, x, y } of entries) {
-        const key = text.trim().slice(0, 30);
+    for (const e of entries) {
+        const key = e.text.trim().slice(0, 30);
         if (seenText.has(key)) continue;
         seenText.add(key);
-        shapes.push(new TextShape(x, y, text, 'Geneva', 12, 0));
+        const ts = new TextShape(e.x, e.y, e.text, 'Geneva', 12, 0);
+        ts.debugSource = { format: 'DRW', offset: e.offset, typeCode: e.typeCode };
+        shapes.push(ts);
     }
     return shapes;
 }
@@ -759,8 +834,39 @@ function findMacDrawObjects(bytes) {
 // Coordinates are 72 DPI page units; scale × (96/72) = × (4/3) to reach canvas pixels.
 const SHAPE_TYPE_NAMES = {
     0x02: 'line', 0x03: 'line-rev', 0x04: 'rect', 0x05: 'roundrect',
-    0x06: 'ellipse', 0x07: 'arc', 0x09: 'polygon/bezier', 0x0a: 'group',
+    0x06: 'ellipse', 0x07: 'arc', 0x08: 'freehand', 0x09: 'polygon/bezier', 0x0a: 'group',
 };
+
+// Freehand pencil stroke (shape type 0x08).
+// Header (36 bytes): [0..3] record header, [4..19] bbox (unused), [20..27] extra,
+// [28..31] start-y Fixed16.16 BE, [32..35] start-x Fixed16.16 BE.
+// After the header: raw signed-byte (dh, dv) delta pairs, terminated by (0, 0).
+function parseFreehandStroke(view, bytes, o, scale) {
+    if (o + 36 > bytes.length) return null;
+    const sy = view.getInt16(o + 28, false) + view.getUint16(o + 30, false) / 65536;
+    const sx = view.getInt16(o + 32, false) + view.getUint16(o + 34, false) / 65536;
+
+    let cx = sx * scale, cy = sy * scale;
+    const pts = [];
+    const push = (x, y) => { const rx = Math.round(x), ry = Math.round(y); pts.push({ x: rx, y: ry, c1x: rx, c1y: ry, c2x: rx, c2y: ry }); };
+    push(cx, cy);
+
+    for (let i = o + 36; i + 1 < bytes.length; i += 2) {
+        const dh = (bytes[i]   << 24) >> 24;   // signed byte
+        const dv = (bytes[i+1] << 24) >> 24;
+        if (dh === 0 && dv === 0) break;
+        cx += dh * scale;
+        cy += dv * scale;
+        push(cx, cy);
+    }
+
+    if (pts.length < 2) return null;
+    const s = new BezierShape(pts);
+    s.strokeWidth      = Math.max(1, bytes[o] - 1);
+    s.strokePatternIdx = bytes[o + 1];
+    s.fillIdx          = 0;
+    return s;
+}
 // byte[o+3] — when non-zero selects rect/roundrect class and encodes corner radius.
 // 0x00 = standard (dispatch via shapeTypeCode). 0x01–0x06 = rect/roundrect variants:
 //   0x01 = square (no rounding), 0x02–0x06 = class/16 inch corner radius.
@@ -795,20 +901,31 @@ function parseMacDrawRecord(view, bytes, o, type, flags, scale, pageOffPtX = 0, 
     const fillFromType  = type === 0x01 ? 0 : type === 0x02 ? 1 : type;
     const strokeWidth   = Math.max(1, bytes[o] - 1);
     const strokePat     = bytes[o + 1];
+    // False-positive guard: real MacDraw shapes use pen widths 1–8 (bytes[o] 2–9).
+    // Values ≥ 25 (strokeWidth ≥ 24) indicate the scanner landed on binary data, not a header.
+    if (strokeWidth >= 24) return null;
 
-    // Lines: shape type 0x02/0x03, OR legacy detection via zero fractional parts when
-    // shapeTypeCode is ambiguous.  Must handle before w/h size check (reverse lines).
+    // Lines: explicit type byte 0x02, shapeTypeCode not a known 2-D shape type.
+    // MacDraw II can store near-integer coordinates as Fixed16.16 values like 0x00fe.ffd8
+    // (≈254.9998 pts) rather than the exact 0x00ff.0000. Allow the high byte of each
+    // fractional part to be 0x00 (near zero) or 0xff (near one); anything in between
+    // indicates a truly sub-pixel free-hand bbox, not a line endpoint.
+    // flags byte encodes arrow mode: 0x00=none, 0x01=start, 0x02=end, 0x03=both.
+    // bytes[o+1]===0x05 marks reshape arcs, which also use type=0x02 — exclude them.
+    const NON_LINE_TYPES = new Set([0x04, 0x05, 0x06, 0x07, 0x09, 0x0a]);
     const isLineType = shapeTypeCode === 0x02 || shapeTypeCode === 0x03;
-    if (flags === 0 && type === 0x02 && bytes[o + 1] !== 0x05 &&
-        (isLineType || shapeTypeCode === 0) &&
-        !(bytes[o+6]|bytes[o+7]|bytes[o+10]|bytes[o+11]|
-          bytes[o+14]|bytes[o+15]|bytes[o+18]|bytes[o+19])) {
+    const nearInt = b => b === 0x00 || b === 0xff;
+    if (flags <= 0x03 && type === 0x02 && bytes[o + 1] !== 0x05 &&
+        (isLineType || !NON_LINE_TYPES.has(shapeTypeCode)) &&
+        nearInt(bytes[o+6]) && nearInt(bytes[o+10]) && nearInt(bytes[o+14]) && nearInt(bytes[o+18])) {
         const lx1 = Math.round((left - pageOffPtX) * scale);
         const ly1 = Math.round((top  - pageOffPtY) * scale);
         const lx2 = Math.round((w_pt - pageOffPtX) * scale);
         const ly2 = Math.round((h_pt - pageOffPtY) * scale);
         const s = new LineShape(lx1, ly1, lx2, ly2);
         s.strokeWidth = strokeWidth;
+        s.strokePatternIdx = strokePat;
+        s.arrowMode = flags; // 0=none, 1=start, 2=end, 3=both
         return s;
     }
 
@@ -851,7 +968,7 @@ function parseMacDrawRecord(view, bytes, o, type, flags, scale, pageOffPtX = 0, 
     // at the canvas edge (e.g. a Q0 arc at x=0 has full oval left = cx - rx < 0).
     // Reshape arcs (marker=0x05, type=0x02) follow the same absolute-bbox convention.
     const _isArcRec = recLen >= 28 && flags === 0x00 &&
-        (type === 0x01 || (type === 0x02 && bytes[o + 1] === 0x05));
+        (type === 0x01 || (type === 0x02 && bytes[o + 1] === 0x05) || shapeTypeCode === 0x07);
     if (_isArcRec ? (top < -500 || left < -500) : (top < 0 || left < 0)) return null;
 
     const x = Math.round((left - pageOffPtX) * scale);
@@ -884,6 +1001,30 @@ function parseMacDrawRecord(view, bytes, o, type, flags, scale, pageOffPtX = 0, 
     if (flags !== 0) {
         console.log(`MDraw: unknown class=0x${flags.toString(16).padStart(2,'0')} shapeType=0x${shapeTypeCode.toString(16).padStart(2,'0')}(${SHAPE_TYPE_NAMES[shapeTypeCode] ?? '?'}) fillMode=0x${type.toString(16).padStart(2,'0')}(${FILL_MODE_NAMES[type] ?? '?'}) (${x},${y}) ${w}×${h} — skipped`);
         return null;
+    }
+
+    // Arc (shape type 0x07): type byte encodes fill pattern, not shape kind.
+    // Must dispatch here so filled arcs don't fall through to wrong shapes in switch.
+    if (shapeTypeCode === 0x07) {
+        const arc_w = Math.round((w_pt - left) * scale) + 1;
+        const arc_h = Math.round((h_pt - top)  * scale) + 1;
+        if (arc_w <= 0 || arc_h <= 0) return null;
+        let startAngle = 0, arcAngle = 90, quadrant = 0;
+        if (recLen >= 28 && o + 28 <= bytes.length) {
+            startAngle = view.getInt16(o + 20, false);
+            arcAngle   = view.getInt16(o + 22, false);
+            const mid  = ((startAngle + arcAngle / 2) % 360 + 360) % 360;
+            quadrant   = Math.min(3, Math.floor(mid / 90));
+        }
+        console.log(`MDraw ARC start=${startAngle} arc=${arcAngle} → Q${quadrant}  (${x},${y}) ${arc_w}×${arc_h} fill=${fillIdx}`);
+        const s = new ArcShape(x, y, arc_w, arc_h);
+        s.quadrant       = quadrant;
+        s.startAngleDeg  = startAngle;
+        s.arcAngleDeg    = arcAngle;
+        s.fillIdx        = fillIdx;
+        s.strokeWidth    = strokeWidth;
+        s.strokePatternIdx = strokePat;
+        return s;
     }
 
     // Ellipse (shape type 0x06): type byte only encodes fill variant, not shape class.
