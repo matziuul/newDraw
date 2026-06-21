@@ -64,6 +64,6 @@ function isMacDrawHeader(bytes) {
     if (bytes.length < 4) return false;
     if (bytes[0]===0x44&&bytes[1]===0x52&&bytes[2]===0x57&&bytes[3]===0x47) return true; // 'DRWG'
     const v = (bytes[0] << 8) | bytes[1];
-    if (v === 0x0000 || v === 0x0100 || v === 0x0200 || v === 0x0300) return true;
-    return false;
+    return v === 0x0000 || v === 0x0100 || v === 0x0200 || v === 0x0300;
+
 }

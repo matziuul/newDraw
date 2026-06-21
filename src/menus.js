@@ -293,7 +293,7 @@ export class MenuSystem {
                 e.preventDefault(); this._execute('textStyle:2'); return;
             }
             if (e.key === 'u' && !e.shiftKey) {
-                e.preventDefault(); this._execute('textStyle:4'); return;
+                e.preventDefault(); this._execute('textStyle:4');
             }
         });
     }
