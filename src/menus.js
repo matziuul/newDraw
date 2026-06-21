@@ -1,6 +1,7 @@
 import { nextUid, offsetShape, GroupShape, applyTransform } from './shapes.js';
 import { FONTS, FONT_SIZES, STYLE_DEFS } from './text-defs.js';
 import { printDrawing } from './print.js';
+import { exportSvg } from './svg-export.js';
 
 const MENUS = [
     { id: 'file', label: 'File', items: [
@@ -10,6 +11,8 @@ const MENUS = [
         { label: 'Import PICT…',            action: 'importPict'  },
         '-',
         { label: 'Save…',        kbd: '⌘S', action: 'save'        },
+        '-',
+        { label: 'Export SVG…',              action: 'exportSvg'   },
         '-',
         { label: 'Canvas Size…',             action: 'canvasSize'  },
         '-',
@@ -320,6 +323,7 @@ export class MenuSystem {
             case 'importPict': this.importInput.click(); return;
             case 'save':       this.saveDoc(); return;
             case 'canvasSize': this.onCanvasSize?.(); return;
+            case 'exportSvg':  exportSvg(state.shapes, this.canvas.width, this.canvas.height); return;
             case 'print':      printDrawing(state.shapes, this.canvas.width, this.canvas.height); return;
 
             // Edit (mirrors logic in ToolController._onKey; syncUI() updates status + toolbar)
