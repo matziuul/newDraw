@@ -16,13 +16,14 @@
 
         #app {
             display: grid;
-            grid-template-columns: 96px 1fr 150px;
-            grid-template-rows: 42px 1fr 24px;
+            grid-template-columns: 84px 1fr 150px;
+            grid-template-rows: 42px auto 1fr 28px;
             height: 100vh;
         }
 
         .menu-bar {
             grid-column: 1 / -1;
+            grid-row: 1;
             display: flex;
             align-items: center;
             gap: 18px;
@@ -95,24 +96,79 @@
         .toolbox {
             background: #e5e5e5;
             border-right: 2px solid black;
-            padding: 6px 4px;
+            padding: 4px 4px;
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 4px;
+            gap: 3px;
             overflow-y: auto;
         }
 
+        /* ── Pattern bar (right of toolbox top, spans editor+inspector columns) ── */
+        .pattern-bar {
+            grid-column: 2 / -1;
+            grid-row: 2;
+            background: #e5e5e5;
+            border-bottom: 2px solid black;
+            border-left: 2px solid black;
+            padding: 3px 10px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            overflow-x: auto;
+        }
+
+        .pattern-bar .pattern-pair {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .pattern-bar .pattern-pair-col {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* 2 fixed rows, columns auto-added as swatches are appended */
+        .pattern-bar .pattern-grid {
+            display: grid;
+            grid-template-rows: 18px 18px;
+            grid-auto-flow: column;
+            grid-auto-columns: 18px;
+            gap: 2px;
+        }
+
+        .pattern-bar-sep {
+            width: 1px;
+            height: 36px;
+            background: #aaa;
+            flex-shrink: 0;
+        }
+
+        .toolbox     { grid-column: 1; grid-row: 2 / 4; }
+        .editor-area { grid-column: 2; grid-row: 3; }
+        .inspector   { grid-column: 3; grid-row: 3; }
+        .status-bar  { grid-row: 4; }
+
+        .tool-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 3px;
+            width: 100%;
+        }
+
         .tool-button {
-            width: 48px;
-            height: 48px;
+            width: 36px;
+            height: 36px;
             border: 2px solid black;
             background: white;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            font-size: 14px;
+            padding: 0;
         }
 
         .tool-button.active { background: black; color: white; }
@@ -170,7 +226,7 @@
         }
 
         .stroke-swatch {
-            width: 48px; height: 16px;
+            width: 36px; height: 14px;
             border: 1px solid black;
             background: white;
             cursor: pointer;
@@ -181,7 +237,7 @@
         #strokeGrid { display: flex; flex-direction: column; gap: 3px; }
 
         .dash-swatch {
-            width: 48px; height: 16px;
+            width: 36px; height: 14px;
             border: 1px solid black;
             background: white;
             cursor: pointer;
@@ -192,7 +248,7 @@
         #dashGrid { display: flex; flex-direction: column; gap: 3px; }
 
         .arrow-swatch {
-            width: 48px; height: 16px;
+            width: 36px; height: 14px;
             border: 1px solid black;
             background: white;
             cursor: pointer;
@@ -203,7 +259,7 @@
         #arrowGrid { display: flex; flex-direction: column; gap: 3px; }
 
         .corner-swatch {
-            width: 36px; height: 22px;
+            width: 32px; height: 20px;
             border: 1px solid black;
             background: white;
             cursor: pointer;
@@ -315,13 +371,43 @@
             padding: 32px;
         }
 
+        /* Zoom stage: sized by JS to zoom * doc size so scroll area is correct.
+           margin: 0 auto centers it when it fits; when wider than viewport the
+           left edge stays at scroll=0 so you can always scroll back to origin. */
+        .zoom-stage {
+            position: relative;
+            margin: 0 auto;
+        }
+
         /* Grid wrapper: corner | h-ruler / v-ruler | document */
         .doc-wrap {
             display: grid;
             grid-template-columns: 20px 1200px;
             grid-template-rows: 20px 900px;
             width: 1220px;
-            margin: 0 auto;
+            transform-origin: 0 0;
+        }
+
+        /* ── Zoom buttons (in status bar) ── */
+        .zoom-btn {
+            height: 22px;
+            width: 30px;
+            border: 1px solid #888;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2px 3px;
+            flex-shrink: 0;
+        }
+        .zoom-btn:hover { background: #e8e8e8; }
+        .zoom-btn:active { background: black; filter: invert(1); }
+        #zoomBtns {
+            display: flex;
+            gap: 2px;
+            align-items: center;
+            margin-right: 8px;
         }
 
         .ruler-corner {
@@ -358,7 +444,6 @@
             display: block;
             width: 100%;
             height: 100%;
-            image-rendering: pixelated;
         }
 
         /* ── Status bar ── */
@@ -385,7 +470,7 @@
             position: fixed;
             top: 42px;
             right: 0;
-            bottom: 24px;
+            bottom: 28px;
             width: 480px;
             background: #1a1a1a;
             color: #ccc;
@@ -486,25 +571,28 @@
         <!-- menus injected by MenuSystem -->
     </div>
 
-    <aside class="toolbox">
-        <button class="tool-button active" data-tool="select"    title="Markera (S)">⌖</button>
-        <button class="tool-button"        data-tool="rectangle" title="Rektangel (R)">▭</button>
-        <button class="tool-button"        data-tool="roundrect" title="Rundrektangel (O)"><svg width="28" height="20" viewBox="0 0 28 20" fill="none" stroke="currentColor" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="24" height="16" rx="4" ry="4" stroke-width="1.8"/></svg></button>
-        <button class="tool-button"        data-tool="ellipse"   title="Ellips (E)">◯</button>
-        <button class="tool-button"        data-tool="line"      title="Linje (L)">／</button>
-        <button class="tool-button"        data-tool="bezier"    title="Bézier (B)"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M4 22 C4 8 22 18 22 4" stroke-width="1.8" stroke-linecap="round"/><circle cx="4" cy="22" r="2.2" fill="currentColor" stroke="none"/><circle cx="22" cy="4" r="2.2" fill="currentColor" stroke="none"/><line x1="4" y1="22" x2="4" y2="8" stroke-width="1" opacity="0.65"/><circle cx="4" cy="8" r="1.8" fill="none" stroke-width="1" opacity="0.65"/><line x1="22" y1="4" x2="22" y2="18" stroke-width="1" opacity="0.65"/><circle cx="22" cy="18" r="1.8" fill="none" stroke-width="1" opacity="0.65"/></svg></button>
-        <button class="tool-button"        data-tool="arc"       title="Båge (A)"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M13 13 L13 2 A11 11 0 0 1 24 13 Z" stroke-width="1.7" stroke-linejoin="round"/></svg></button>
-        <button class="tool-button"        data-tool="text"      title="Text (T)">A</button>
-        <hr class="tool-divider" />
+    <div class="pattern-bar">
         <div class="pattern-pair">
             <div class="pattern-pair-col">
-                <span class="toolbar-label">Fyll</span>
                 <div class="pattern-grid" id="patternGrid"></div>
             </div>
+            <div class="pattern-bar-sep"></div>
             <div class="pattern-pair-col">
-                <span class="toolbar-label">Penna</span>
                 <div class="pattern-grid" id="strokePatternGrid"></div>
             </div>
+        </div>
+    </div>
+
+    <aside class="toolbox">
+        <div class="tool-grid">
+            <button class="tool-button active" data-tool="select"    title="Markera (S)">⌖</button>
+            <button class="tool-button"        data-tool="rectangle" title="Rektangel (R)">▭</button>
+            <button class="tool-button"        data-tool="roundrect" title="Rundrektangel (O)"><svg width="22" height="16" viewBox="0 0 28 20" fill="none" stroke="currentColor"><rect x="2" y="2" width="24" height="16" rx="4" ry="4" stroke-width="1.8"/></svg></button>
+            <button class="tool-button"        data-tool="ellipse"   title="Ellips (E)">◯</button>
+            <button class="tool-button"        data-tool="line"      title="Linje (L)">／</button>
+            <button class="tool-button"        data-tool="bezier"    title="Bézier (B)"><svg width="22" height="22" viewBox="0 0 26 26" fill="none" stroke="currentColor"><path d="M4 22 C4 8 22 18 22 4" stroke-width="1.8" stroke-linecap="round"/><circle cx="4" cy="22" r="2.2" fill="currentColor" stroke="none"/><circle cx="22" cy="4" r="2.2" fill="currentColor" stroke="none"/><line x1="4" y1="22" x2="4" y2="8" stroke-width="1" opacity="0.65"/><circle cx="4" cy="8" r="1.8" fill="none" stroke-width="1" opacity="0.65"/><line x1="22" y1="4" x2="22" y2="18" stroke-width="1" opacity="0.65"/><circle cx="22" cy="18" r="1.8" fill="none" stroke-width="1" opacity="0.65"/></svg></button>
+            <button class="tool-button"        data-tool="arc"       title="Båge (A)"><svg width="22" height="22" viewBox="0 0 26 26" fill="none" stroke="currentColor"><path d="M13 13 L13 2 A11 11 0 0 1 24 13 Z" stroke-width="1.7" stroke-linejoin="round"/></svg></button>
+            <button class="tool-button"        data-tool="text"      title="Text (T)">A</button>
         </div>
         <hr class="tool-divider" />
         <div id="strokeGrid"></div>
@@ -517,13 +605,15 @@
     </aside>
 
     <main class="editor-area">
-        <div class="doc-wrap">
-            <div class="ruler-corner"></div>
-            <canvas id="rulerH" width="1200" height="20"></canvas>
-            <canvas id="rulerV" width="20"   height="900"></canvas>
-            <div class="document">
-                <canvas id="drawingCanvas" width="1200" height="900"></canvas>
-                <div id="textInput" contenteditable="true" spellcheck="false"></div>
+        <div class="zoom-stage">
+            <div class="doc-wrap">
+                <div class="ruler-corner"></div>
+                <canvas id="rulerH" width="1200" height="20"></canvas>
+                <canvas id="rulerV" width="20"   height="900"></canvas>
+                <div class="document">
+                    <canvas id="drawingCanvas" width="1200" height="900"></canvas>
+                    <div id="textInput" contenteditable="true" spellcheck="false"></div>
+                </div>
             </div>
         </div>
     </main>
@@ -546,10 +636,30 @@
             <span class="insp-label">H</span>
             <input class="insp-input" id="inspH" type="number" min="0">
         </div>
+        <div class="insp-row" id="inspArcRow" style="display:none">
+            <span class="insp-label">°</span>
+            <input class="insp-input" id="inspArc" type="number" min="1" max="360" step="1">
+        </div>
         <div class="insp-unit" id="inspUnit">px</div>
     </aside>
 
     <footer class="status-bar">
+        <div id="zoomBtns">
+            <button class="zoom-btn" id="zoomOut" title="Zoom Out">
+                <svg width="22" height="16" viewBox="0 0 26 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <polygon points="1,18 9,11 17,18"  fill="white" stroke="black" stroke-width="1.5" stroke-linejoin="round"/>
+                    <polygon points="10,18 19,7 26,18"  fill="white" stroke="black" stroke-width="1.5" stroke-linejoin="round"/>
+                    <line x1="0" y1="18" x2="26" y2="18" stroke="black" stroke-width="1.5"/>
+                </svg>
+            </button>
+            <button class="zoom-btn" id="zoomIn" title="Zoom In">
+                <svg width="22" height="16" viewBox="0 0 26 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <polygon points="0,19 8,7 16,19"  fill="white" stroke="black" stroke-width="1.5" stroke-linejoin="round"/>
+                    <polygon points="9,19 19,1 26,19"  fill="white" stroke="black" stroke-width="1.5" stroke-linejoin="round"/>
+                    <line x1="0" y1="19" x2="26" y2="19" stroke="black" stroke-width="1.5"/>
+                </svg>
+            </button>
+        </div>
         <span id="statusTool">Verktyg: Select</span>
         <span id="statusPos"></span>
         <span id="statusSize"></span>

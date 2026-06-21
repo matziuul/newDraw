@@ -64,13 +64,13 @@ export class Toolbar {
         const grid = document.getElementById('cornerGrid');
         CORNER_CLASSES.forEach((cls, i) => {
             const cv = document.createElement('canvas');
-            cv.width = 36; cv.height = 22;
+            cv.width = 32; cv.height = 20;
             cv.className = 'corner-swatch';
             cv.title = TITLES[i];
             if (cls === this.state.activeCornerClass) cv.classList.add('active');
             const ctx = cv.getContext('2d');
-            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 36, 22);
-            const r = PREVIEW_RADII[i], x = 3.5, y = 3.5, w = 29, h = 15;
+            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 32, 20);
+            const r = PREVIEW_RADII[i], x = 2.5, y = 2.5, w = 27, h = 15;
             ctx.strokeStyle = 'black'; ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(x + r, y);
@@ -116,18 +116,18 @@ export class Toolbar {
         const grid = document.getElementById('strokeGrid');
         STROKE_WIDTHS.forEach(w => {
             const cv = document.createElement('canvas');
-            cv.width = 48; cv.height = 16;
+            cv.width = 36; cv.height = 14;
             cv.className = 'stroke-swatch';
             cv.title = `${w}px`;
             if (w === this.state.activeStrokeWidth) cv.classList.add('active');
             const ctx = cv.getContext('2d');
-            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 48, 16);
+            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 36, 14);
             ctx.strokeStyle = 'black';
             ctx.lineWidth = w;
             ctx.lineCap = 'butt';
-            ctx.beginPath(); ctx.moveTo(4, 8); ctx.lineTo(44, 8); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(4, 7); ctx.lineTo(32, 7); ctx.stroke();
             ctx.lineWidth = 1;
-            ctx.strokeRect(0.5, 0.5, 47, 15);
+            ctx.strokeRect(0.5, 0.5, 35, 13);
 
             cv.addEventListener('click', () => {
                 this.state.activeStrokeWidth = w;
@@ -185,19 +185,19 @@ export class Toolbar {
         const grid = document.getElementById('dashGrid');
         STROKE_DASHES.forEach((d, idx) => {
             const cv = document.createElement('canvas');
-            cv.width = 48; cv.height = 16;
+            cv.width = 36; cv.height = 14;
             cv.className = 'dash-swatch';
             cv.title = d.name;
             if (idx === 0) cv.classList.add('active');
             const ctx = cv.getContext('2d');
-            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 48, 16);
+            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 36, 14);
             ctx.strokeStyle = 'black';
             ctx.lineWidth = 2;
             ctx.setLineDash(d.dash);
-            ctx.beginPath(); ctx.moveTo(4, 8); ctx.lineTo(44, 8); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(4, 7); ctx.lineTo(32, 7); ctx.stroke();
             ctx.setLineDash([]);
             ctx.lineWidth = 1;
-            ctx.strokeRect(0.5, 0.5, 47, 15);
+            ctx.strokeRect(0.5, 0.5, 35, 13);
 
             cv.addEventListener('click', () => {
                 this.state.activeStrokeDash = idx;
@@ -218,26 +218,26 @@ export class Toolbar {
         const grid = document.getElementById('arrowGrid');
         ARROW_MODES.forEach((mode, idx) => {
             const cv = document.createElement('canvas');
-            cv.width = 48; cv.height = 16;
+            cv.width = 36; cv.height = 14;
             cv.className = 'arrow-swatch';
             cv.title = mode.name;
             if (idx === 0) cv.classList.add('active');
             const ctx = cv.getContext('2d');
-            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 48, 16);
+            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 36, 14);
             ctx.strokeStyle = 'black'; ctx.fillStyle = 'black';
             ctx.lineWidth = 1.5; ctx.lineCap = 'butt';
-            const L = 6, W = 3;
-            let x1 = 7, x2 = 41;
+            const L = 5, W = 3;
+            let x1 = 5, x2 = 31;
             if (mode.end)   x2 -= L;
             if (mode.start) x1 += L;
-            ctx.beginPath(); ctx.moveTo(x1, 8); ctx.lineTo(x2, 8); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x1, 7); ctx.lineTo(x2, 7); ctx.stroke();
             if (mode.end) {
-                ctx.beginPath(); ctx.moveTo(41, 8); ctx.lineTo(41-L, 8-W); ctx.lineTo(41-L, 8+W); ctx.closePath(); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(31, 7); ctx.lineTo(31-L, 7-W); ctx.lineTo(31-L, 7+W); ctx.closePath(); ctx.fill();
             }
             if (mode.start) {
-                ctx.beginPath(); ctx.moveTo(7, 8); ctx.lineTo(7+L, 8-W); ctx.lineTo(7+L, 8+W); ctx.closePath(); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(5, 7); ctx.lineTo(5+L, 7-W); ctx.lineTo(5+L, 7+W); ctx.closePath(); ctx.fill();
             }
-            ctx.lineWidth = 1; ctx.strokeRect(0.5, 0.5, 47, 15);
+            ctx.lineWidth = 1; ctx.strokeRect(0.5, 0.5, 35, 13);
 
             cv.addEventListener('click', () => {
                 this.state.activeArrowMode = idx;

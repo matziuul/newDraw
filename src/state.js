@@ -46,6 +46,8 @@ export class AppState {
 
         this.pageW = null;   // px — page width for break markers; null = off
         this.pageH = null;   // px — page height for break markers
+
+        this.zoom = 1.0;     // current zoom level (1 = 100%)
     }
 
     get selectedShape() {

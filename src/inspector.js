@@ -6,11 +6,13 @@ export class Inspector {
         this.renderer = renderer;
         this.history  = history;
 
-        this.elX    = document.getElementById('inspX');
-        this.elY    = document.getElementById('inspY');
-        this.elW    = document.getElementById('inspW');
-        this.elH    = document.getElementById('inspH');
-        this.elUnit = document.getElementById('inspUnit');
+        this.elX       = document.getElementById('inspX');
+        this.elY       = document.getElementById('inspY');
+        this.elW       = document.getElementById('inspW');
+        this.elH       = document.getElementById('inspH');
+        this.elUnit    = document.getElementById('inspUnit');
+        this.elArc     = document.getElementById('inspArc');
+        this.elArcRow  = document.getElementById('inspArcRow');
 
         this._attachEvents();
         document.getElementById('selUnit')
@@ -26,6 +28,7 @@ export class Inspector {
         apply(this.elY, 'y');
         apply(this.elW, 'w');
         apply(this.elH, 'h');
+        apply(this.elArc, 'arc');
     }
 
     _toPx(v) {
@@ -55,6 +58,20 @@ export class Inspector {
         const val = this._toPx(parseFloat(el.value));
         if (isNaN(val) || val < 0 && (field === 'w' || field === 'h')) {
             this.sync(); return;
+        }
+
+        if (field === 'arc') {
+            if (sel.type !== 'arc') { this.sync(); return; }
+            const deg = Math.round(parseFloat(this.elArc.value));
+            if (isNaN(deg) || deg < 1 || deg > 360) { this.sync(); return; }
+            const snap = this.history.savePreOp();
+            if (sel.startAngleDeg === undefined)
+                sel.startAngleDeg = [0, 90, 180, 270][sel.quadrant ?? 1];
+            sel.arcAngleDeg = deg;
+            this.history.commit(snap);
+            this.renderer.render();
+            this.sync();
+            return;
         }
 
         const snap = this.history.savePreOp();
@@ -98,6 +115,7 @@ export class Inspector {
             [this.elX, this.elY, this.elW, this.elH].forEach(el => {
                 el.value = ''; el.disabled = true;
             });
+            this.elArcRow.style.display = 'none';
             return;
         }
 
@@ -128,5 +146,12 @@ export class Inspector {
         this.elY.disabled = !canMove;
         this.elW.disabled = !canResize;
         this.elH.disabled = !canResize;
+
+        const isArc = !multi && sel?.type === 'arc';
+        this.elArcRow.style.display = isArc ? '' : 'none';
+        if (isArc) {
+            this.elArc.value = Math.round(sel.arcAngleDeg ?? 90);
+            this.elArc.disabled = !canEdit;
+        }
     }
 }

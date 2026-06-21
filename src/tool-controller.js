@@ -60,9 +60,10 @@ export class ToolController {
 
     _pos(e) {
         const r = this.canvas.getBoundingClientRect();
+        const z = this.state.zoom ?? 1;
         return {
-            x: (e.clientX - r.left) * (this.canvas.width  / r.width),
-            y: (e.clientY - r.top)  * (this.canvas.height / r.height),
+            x: (e.clientX - r.left) / z,
+            y: (e.clientY - r.top)  / z,
         };
     }
 
@@ -147,9 +148,10 @@ export class ToolController {
     _fmtY(py) { return this._fmt(py - (this.state.rulerOriginY || 0)); }
 
     _onKey(e) {
-        // Don't intercept keys while text overlay is focused
-        if (this.textInput && document.activeElement === this.textInput) {
-            if (e.key === 'Escape') { e.preventDefault(); this._cancelText(); }
+        // Don't intercept keys while any text input is focused
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+            if (active === this.textInput && e.key === 'Escape') { e.preventDefault(); this._cancelText(); }
             return;
         }
 
@@ -276,7 +278,7 @@ export class ToolController {
 
         // Arc endpoint handle drag (single selected arc, unlocked)
         if (sel?.type === 'arc' && !sel.locked) {
-            const ah = hitTestArcHandle(pos.x, pos.y, sel);
+            const ah = hitTestArcHandle(pos.x, pos.y, sel, state.zoom ?? 1);
             if (ah !== null) {
                 // Convert quarter arc to general representation before dragging
                 if (sel.startAngleDeg === undefined) {
@@ -297,7 +299,7 @@ export class ToolController {
 
         // Bezier handle drag (single selected bezier, unlocked)
         if (sel?.type === 'bezier' && !sel.locked) {
-            const bh = hitTestBezierHandle(pos.x, pos.y, sel);
+            const bh = hitTestBezierHandle(pos.x, pos.y, sel, state.zoom ?? 1);
             if (bh) {
                 this.preOpSnapshot = this.history.savePreOp();
                 this.originShape = sel.clone();
@@ -312,7 +314,7 @@ export class ToolController {
 
         // Resize handle (single selected non-bezier, non-group, non-text, unlocked)
         if (sel && sel.type !== 'bezier' && sel.type !== 'group' && sel.type !== 'text' && !sel.locked) {
-            const hid = hitTestHandle(pos.x, pos.y, sel.getSelectionBounds?.() ?? sel.getBounds());
+            const hid = hitTestHandle(pos.x, pos.y, sel.getSelectionBounds?.() ?? sel.getBounds(), state.zoom ?? 1);
             if (hid) {
                 this.preOpSnapshot = this.history.savePreOp();
                 this.originShape = sel.clone();
@@ -411,17 +413,35 @@ export class ToolController {
 
         if (this.dragMode === 'draw') {
             const d = this.state.currentDraft;
-            if (d.type === 'line') { d.x2 = pos.x; d.y2 = pos.y; }
-            else if (d.type === 'arc') {
+            const constrain = e.shiftKey;
+            if (d.type === 'line') {
+                if (constrain && (dx !== 0 || dy !== 0)) {
+                    const angle = Math.atan2(dy, dx);
+                    const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+                    const dist = Math.hypot(dx, dy);
+                    d.x2 = this.startX + Math.cos(snapped) * dist;
+                    d.y2 = this.startY + Math.sin(snapped) * dist;
+                } else {
+                    d.x2 = pos.x; d.y2 = pos.y;
+                }
+            } else if (d.type === 'arc') {
                 // Position the full ellipse so one arc endpoint lands exactly at the
                 // click and the other at the drag: cx=startX, cy=startY+dy, rx=|dx|, ry=|dy|.
                 const ax = Math.abs(dx), ay = Math.abs(dy);
-                d.x = this.startX - ax;
-                d.y = this.startY + dy - ay;  // cy - ry
-                d.width = 2 * ax; d.height = 2 * ay;
+                const r = constrain ? Math.max(ax, ay) : null;
+                const fax = r ?? ax, fay = r ?? ay;
+                d.x = this.startX - fax;
+                d.y = this.startY + dy - fay;  // cy - ry
+                d.width = 2 * fax; d.height = 2 * fay;
                 d.quadrant = dx >= 0 ? (dy >= 0 ? 0 : 1) : (dy >= 0 ? 3 : 2);
             } else {
-                d.width = dx; d.height = dy;
+                if (constrain) {
+                    const size = Math.max(Math.abs(dx), Math.abs(dy));
+                    d.width  = dx >= 0 ? size : -size;
+                    d.height = dy >= 0 ? size : -size;
+                } else {
+                    d.width = dx; d.height = dy;
+                }
             }
 
         } else if (this.dragMode === 'move') {
@@ -464,6 +484,7 @@ export class ToolController {
             this._applyBezierHandleDrag(rawPos);
         } else if (this.dragMode === 'arcHandle') {
             this._applyArcHandleDrag(rawPos);
+            this.inspector?.sync();
         }
 
         this._updateStatusWhileDragging(pos);
@@ -604,7 +625,7 @@ export class ToolController {
 
         if (sel) {
             if (sel.type === 'arc' && !sel.locked) {
-                const ah = hitTestArcHandle(pos.x, pos.y, sel);
+                const ah = hitTestArcHandle(pos.x, pos.y, sel, state.zoom ?? 1);
                 if (ah !== null) {
                     state.hoveredArcHandle = ah;
                     this.canvas.style.cursor = 'crosshair';
@@ -612,14 +633,14 @@ export class ToolController {
                 }
             }
             if (sel.type === 'bezier' && !sel.locked) {
-                const bh = hitTestBezierHandle(pos.x, pos.y, sel);
+                const bh = hitTestBezierHandle(pos.x, pos.y, sel, state.zoom ?? 1);
                 if (bh) {
                     state.hoveredBezierHandle = bh;
                     this.canvas.style.cursor = bh.role === 'anchor' ? 'move' : 'crosshair';
                     return;
                 }
             } else if (sel.type !== 'bezier' && sel.type !== 'group' && sel.type !== 'text' && !sel.locked) {
-                const hid = hitTestHandle(pos.x, pos.y, sel.getSelectionBounds?.() ?? sel.getBounds());
+                const hid = hitTestHandle(pos.x, pos.y, sel.getSelectionBounds?.() ?? sel.getBounds(), state.zoom ?? 1);
                 if (hid) { this.canvas.style.cursor = HANDLE_DEFS.find(d => d.id === hid)?.cursor ?? 'default'; return; }
             }
             if (sel.hitTest(pos.x, pos.y)) { this.canvas.style.cursor = 'move'; return; }

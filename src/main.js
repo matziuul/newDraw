@@ -44,25 +44,51 @@ const PAPER_SIZES = {
     ltl: { w: 1056, h: 816  },
 };
 
-const rulerH  = document.getElementById('rulerH');
-const rulerV  = document.getElementById('rulerV');
-const docWrap = document.querySelector('.doc-wrap');
-const docDiv  = document.querySelector('.document');
+const rulerH    = document.getElementById('rulerH');
+const rulerV    = document.getElementById('rulerV');
+const docWrap   = document.querySelector('.doc-wrap');
+const zoomStage = document.querySelector('.zoom-stage');
+const docDiv    = document.querySelector('.document');
 
-function resizeCanvas(w, h) {
+// ── Zoom ──────────────────────────────────────────────────────────────────────
+// baseW/baseH are the logical document size at zoom=1 (in canvas pixels).
+// applyZoom scales the canvas resolution and all CSS sizes to match.
+const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
+let baseW = 794, baseH = 1123;  // A4 portrait at 96 dpi
+
+function applyZoom(z) {
+    state.zoom = z;
+    const w = Math.round(baseW * z);
+    const h = Math.round(baseH * z);
     canvas.width  = w;
     canvas.height = h;
-    rulerH.width  = w;
-    rulerH.style.width = `${w}px`;
-    rulerV.height = h;
-    rulerV.style.height = `${h}px`;
+    rulerH.width  = w;  rulerH.style.width  = `${w}px`;
+    rulerV.height = h;  rulerV.style.height = `${h}px`;
     docWrap.style.gridTemplateColumns = `20px ${w}px`;
     docWrap.style.gridTemplateRows    = `20px ${h}px`;
-    docWrap.style.width = `${w + 20}px`;
-    docDiv.style.width  = `${w}px`;
-    docDiv.style.height = `${h}px`;
+    docWrap.style.width  = `${w + 20}px`;
+    docWrap.style.transform = '';
+    docDiv.style.width   = `${w}px`;
+    docDiv.style.height  = `${h}px`;
+    zoomStage.style.width  = `${w + 20}px`;
+    zoomStage.style.height = `${h + 20}px`;
     ruler.rebuild();
     renderer.render();
+}
+
+document.getElementById('zoomIn').addEventListener('click', () => {
+    const i = ZOOM_LEVELS.findIndex(l => Math.abs(l - state.zoom) < 0.001);
+    if (i < ZOOM_LEVELS.length - 1) applyZoom(ZOOM_LEVELS[i + 1]);
+});
+document.getElementById('zoomOut').addEventListener('click', () => {
+    const i = ZOOM_LEVELS.findIndex(l => Math.abs(l - state.zoom) < 0.001);
+    if (i > 0) applyZoom(ZOOM_LEVELS[i - 1]);
+});
+
+function resizeCanvas(w, h) {
+    baseW = w;
+    baseH = h;
+    applyZoom(state.zoom);
 }
 
 function setupCanvasSizeDialog() {
@@ -239,4 +265,5 @@ if (rulerCorner) {
     });
 }
 
+applyZoom(currentZoom);
 renderer.render();

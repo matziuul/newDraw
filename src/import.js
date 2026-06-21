@@ -837,6 +837,48 @@ const SHAPE_TYPE_NAMES = {
     0x06: 'ellipse', 0x07: 'arc', 0x08: 'freehand', 0x09: 'polygon/bezier', 0x0a: 'group',
 };
 
+// Ramer-Douglas-Peucker polyline simplification.
+function rdpSimplify(pts, eps) {
+    if (pts.length < 3) return pts.slice();
+    const p0 = pts[0], pn = pts[pts.length - 1];
+    const dx = pn.x - p0.x, dy = pn.y - p0.y;
+    const len2 = dx * dx + dy * dy;
+    let maxDist = 0, maxIdx = 1;
+    for (let i = 1; i < pts.length - 1; i++) {
+        const d = len2 === 0
+            ? Math.hypot(pts[i].x - p0.x, pts[i].y - p0.y)
+            : Math.abs(dx * (p0.y - pts[i].y) - dy * (p0.x - pts[i].x)) / Math.sqrt(len2);
+        if (d > maxDist) { maxDist = d; maxIdx = i; }
+    }
+    if (maxDist <= eps) return [p0, pn];
+    const L = rdpSimplify(pts.slice(0, maxIdx + 1), eps);
+    const R = rdpSimplify(pts.slice(maxIdx), eps);
+    return L.concat(R.slice(1));
+}
+
+// Convert a simplified polyline to bezier points using Catmull-Rom tangents.
+// Each interior point gets c1/c2 from the centripetal tangent; endpoints use
+// one-sided tangents so the curve enters/exits smoothly without overshooting.
+function catmullRomBezier(pts) {
+    const n = pts.length;
+    const result = [];
+    for (let i = 0; i < n; i++) {
+        const p = pts[i];
+        let tx, ty;
+        if (i === 0)       { tx = pts[1].x - p.x;         ty = pts[1].y - p.y; }
+        else if (i === n-1){ tx = p.x - pts[n-2].x;       ty = p.y - pts[n-2].y; }
+        else               { tx = (pts[i+1].x - pts[i-1].x) / 2; ty = (pts[i+1].y - pts[i-1].y) / 2; }
+        result.push({
+            x:   p.x,             y:   p.y,
+            c1x: i === 0   ? p.x : p.x - tx / 3,
+            c1y: i === 0   ? p.y : p.y - ty / 3,
+            c2x: i === n-1 ? p.x : p.x + tx / 3,
+            c2y: i === n-1 ? p.y : p.y + ty / 3,
+        });
+    }
+    return result;
+}
+
 // Freehand pencil stroke (shape type 0x08).
 // Header (36 bytes): [0..3] record header, [4..19] bbox (unused), [20..27] extra,
 // [28..31] start-y Fixed16.16 BE, [32..35] start-x Fixed16.16 BE.
@@ -847,20 +889,25 @@ function parseFreehandStroke(view, bytes, o, scale) {
     const sx = view.getInt16(o + 32, false) + view.getUint16(o + 34, false) / 65536;
 
     let cx = sx * scale, cy = sy * scale;
-    const pts = [];
-    const push = (x, y) => { const rx = Math.round(x), ry = Math.round(y); pts.push({ x: rx, y: ry, c1x: rx, c1y: ry, c2x: rx, c2y: ry }); };
-    push(cx, cy);
+    const raw = [{ x: cx, y: cy }];
 
     for (let i = o + 36; i + 1 < bytes.length; i += 2) {
-        const dh = (bytes[i]   << 24) >> 24;   // signed byte
+        const dh = (bytes[i]   << 24) >> 24;
         const dv = (bytes[i+1] << 24) >> 24;
         if (dh === 0 && dv === 0) break;
         cx += dh * scale;
         cy += dv * scale;
-        push(cx, cy);
+        raw.push({ x: cx, y: cy });
     }
 
-    if (pts.length < 2) return null;
+    if (raw.length < 2) return null;
+
+    // Simplify the dense delta-point cloud, then fit smooth bezier curves.
+    // Tolerance 1.5 canvas px keeps visible detail while collapsing runs of
+    // nearly-collinear deltas into single cubic segments.
+    const simplified = rdpSimplify(raw, 1.5);
+    const pts = catmullRomBezier(simplified);
+
     const s = new BezierShape(pts);
     s.strokeWidth      = Math.max(1, bytes[o] - 1);
     s.strokePatternIdx = bytes[o + 1];

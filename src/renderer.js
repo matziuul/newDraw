@@ -11,7 +11,10 @@ export class Renderer {
 
     render() {
         const { ctx, canvas, state, patterns } = this;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const z = state.zoom ?? 1;
+        this._z = z;
+        ctx.setTransform(z, 0, 0, z, 0, 0);
+        ctx.clearRect(0, 0, canvas.width / z, canvas.height / z);
 
         if (state.showGrid) this._drawGrid();
         if (state.pageW && state.pageH) this._drawPageMarkers();
@@ -43,18 +46,20 @@ export class Renderer {
 
     _drawGrid() {
         const { ctx, canvas, state } = this;
+        const z = this._z ?? 1;
+        const lw = canvas.width / z, lh = canvas.height / z;
         const step = state.gridStep;
         ctx.save();
         ctx.strokeStyle = 'rgba(0,85,255,0.12)';
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1 / z;
         ctx.beginPath();
-        for (let x = 0; x <= canvas.width; x += step) {
-            const px = Math.round(x) + 0.5;
-            ctx.moveTo(px, 0); ctx.lineTo(px, canvas.height);
+        for (let x = 0; x <= lw; x += step) {
+            const px = Math.round(x) + 0.5 / z;
+            ctx.moveTo(px, 0); ctx.lineTo(px, lh);
         }
-        for (let y = 0; y <= canvas.height; y += step) {
-            const py = Math.round(y) + 0.5;
-            ctx.moveTo(0, py); ctx.lineTo(canvas.width, py);
+        for (let y = 0; y <= lh; y += step) {
+            const py = Math.round(y) + 0.5 / z;
+            ctx.moveTo(0, py); ctx.lineTo(lw, py);
         }
         ctx.stroke();
         ctx.restore();
@@ -70,11 +75,12 @@ export class Renderer {
             return;
         }
 
-        ctx.setLineDash([6, 4]); ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+        const z = this._z ?? 1;
+        ctx.setLineDash([6 / z, 4 / z]); ctx.strokeStyle = '#333'; ctx.lineWidth = 1 / z;
 
         if (d.type === 'line') {
             ctx.beginPath();
-            ctx.moveTo(d.x1 + 0.5, d.y1 + 0.5); ctx.lineTo(d.x2 + 0.5, d.y2 + 0.5);
+            ctx.moveTo(d.x1 + 0.5 / z, d.y1 + 0.5 / z); ctx.lineTo(d.x2 + 0.5 / z, d.y2 + 0.5 / z);
             ctx.stroke();
         } else {
             const { x, y, width, height } = normalize(d.x, d.y, d.width, d.height);
@@ -103,7 +109,7 @@ export class Renderer {
                 }
                 ctx.stroke();
             } else {
-                ctx.strokeRect(x + 0.5, y + 0.5, width, height);
+                ctx.strokeRect(x + 0.5 / z, y + 0.5 / z, width, height);
             }
         }
         ctx.restore();
@@ -112,10 +118,11 @@ export class Renderer {
     _drawBezierDraft(d) {
         const ctx = this.ctx, pts = d.points;
         if (pts.length === 0) return;
+        const z = this._z ?? 1;
 
         // Draw committed segments
         if (pts.length >= 2) {
-            ctx.setLineDash([6, 4]); ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+            ctx.setLineDash([6 / z, 4 / z]); ctx.strokeStyle = '#333'; ctx.lineWidth = 1 / z;
             ctx.beginPath();
             ctx.moveTo(pts[0].x, pts[0].y);
             for (let i = 1; i < pts.length; i++) {
@@ -125,7 +132,7 @@ export class Renderer {
         }
 
         // Preview line from last anchor to current mouse
-        ctx.setLineDash([3, 4]); ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1;
+        ctx.setLineDash([3 / z, 4 / z]); ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1 / z;
         ctx.beginPath();
         ctx.moveTo(pts[pts.length-1].x, pts[pts.length-1].y);
         ctx.lineTo(d.mouseX, d.mouseY);
@@ -133,52 +140,59 @@ export class Renderer {
         ctx.setLineDash([]);
 
         // Anchor points and control handles
+        const cr = 3 / z, hs = 4 / z;
         for (const p of pts) {
             if (p.c2x !== p.x || p.c2y !== p.y) {
-                ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1;
+                ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1 / z;
                 ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.c2x, p.c2y); ctx.stroke();
-                ctx.beginPath(); ctx.arc(p.c2x, p.c2y, 3, 0, Math.PI * 2);
+                ctx.beginPath(); ctx.arc(p.c2x, p.c2y, cr, 0, Math.PI * 2);
                 ctx.fillStyle = '#0055ff'; ctx.fill();
             }
             if (p.c1x !== p.x || p.c1y !== p.y) {
-                ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1;
+                ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1 / z;
                 ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.c1x, p.c1y); ctx.stroke();
-                ctx.beginPath(); ctx.arc(p.c1x, p.c1y, 3, 0, Math.PI * 2);
+                ctx.beginPath(); ctx.arc(p.c1x, p.c1y, cr, 0, Math.PI * 2);
                 ctx.fillStyle = '#0055ff'; ctx.fill();
             }
             ctx.fillStyle = 'white';
-            ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
-            ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
-            ctx.strokeRect(p.x - 3.5, p.y - 3.5, 7, 7);
+            ctx.fillRect(p.x - hs, p.y - hs, hs * 2, hs * 2);
+            ctx.strokeStyle = '#333'; ctx.lineWidth = 1 / z;
+            ctx.strokeRect(p.x - hs + 0.5 / z, p.y - hs + 0.5 / z, hs * 2 - 1 / z, hs * 2 - 1 / z);
         }
     }
 
     _drawMultiOutline(shape) {
-        const b = shape.getBounds(), pad = 3;
+        const b = shape.getBounds();
         const ctx = this.ctx;
+        const z = this._z ?? 1;
+        const pad = 3 / z, n = 0.5 / z;
         ctx.save();
-        ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
-        ctx.strokeRect(b.x - pad + 0.5, b.y - pad + 0.5, b.width + pad*2, b.height + pad*2);
+        ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1 / z; ctx.setLineDash([4 / z, 3 / z]);
+        ctx.strokeRect(b.x - pad + n, b.y - pad + n, b.width + pad*2, b.height + pad*2);
         ctx.restore();
     }
 
     _drawRubberBand(rb) {
         const ctx = this.ctx;
+        const z = this._z ?? 1;
+        const n = 0.5 / z;
         ctx.save();
         ctx.fillStyle = 'rgba(0,85,255,0.05)';
         ctx.fillRect(rb.x, rb.y, rb.w, rb.h);
-        ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
-        ctx.strokeRect(rb.x + 0.5, rb.y + 0.5, rb.w, rb.h);
+        ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1 / z; ctx.setLineDash([4 / z, 3 / z]);
+        ctx.strokeRect(rb.x + n, rb.y + n, rb.w, rb.h);
         ctx.restore();
     }
 
     _drawSelection(shape) {
         if (shape.type === 'bezier') { this._drawBezierSelection(shape); return; }
 
-        const ctx = this.ctx, b = shape.getSelectionBounds?.() ?? shape.getBounds(), pad = 4;
+        const ctx = this.ctx, b = shape.getSelectionBounds?.() ?? shape.getBounds();
+        const z = this._z ?? 1;
+        const pad = 4 / z, n = 0.5 / z, hs = HS / z;
         ctx.save();
-        ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1; ctx.setLineDash([5, 3]);
-        ctx.strokeRect(b.x - pad + 0.5, b.y - pad + 0.5, b.width + pad*2, b.height + pad*2);
+        ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1 / z; ctx.setLineDash([5 / z, 3 / z]);
+        ctx.strokeRect(b.x - pad + n, b.y - pad + n, b.width + pad*2, b.height + pad*2);
         ctx.setLineDash([]);
 
         // Groups and text: just the dashed outline, no resize handles
@@ -187,9 +201,9 @@ export class Renderer {
         const locked = shape.locked;
         for (const h of getHandlePoints(b)) {
             ctx.fillStyle = locked ? '#b0b0b0' : 'white';
-            ctx.fillRect(h.x - HS, h.y - HS, HS*2, HS*2);
-            ctx.strokeStyle = locked ? '#666' : 'black'; ctx.lineWidth = 1;
-            ctx.strokeRect(h.x - HS + 0.5, h.y - HS + 0.5, HS*2 - 1, HS*2 - 1);
+            ctx.fillRect(h.x - hs, h.y - hs, hs*2, hs*2);
+            ctx.strokeStyle = locked ? '#666' : 'black'; ctx.lineWidth = 1 / z;
+            ctx.strokeRect(h.x - hs + n, h.y - hs + n, hs*2 - 1/z, hs*2 - 1/z);
         }
 
         // Arc endpoint handles for reshape dragging
@@ -199,13 +213,13 @@ export class Renderer {
             for (const [i, pt] of shape.getArcHandlePositions().entries()) {
                 const active = hov === i || drag === i;
                 ctx.beginPath();
-                ctx.arc(pt.x, pt.y, active ? 6 : 4, 0, Math.PI * 2);
+                ctx.arc(pt.x, pt.y, (active ? 6 : 4) / z, 0, Math.PI * 2);
                 if (active) {
                     ctx.fillStyle = 'white'; ctx.fill();
-                    ctx.strokeStyle = '#0044dd'; ctx.lineWidth = 1.5; ctx.stroke();
+                    ctx.strokeStyle = '#0044dd'; ctx.lineWidth = 1.5 / z; ctx.stroke();
                 } else {
                     ctx.fillStyle = '#0055ff'; ctx.strokeStyle = '#003bbf';
-                    ctx.lineWidth = 1; ctx.fill(); ctx.stroke();
+                    ctx.lineWidth = 1 / z; ctx.fill(); ctx.stroke();
                 }
             }
         }
@@ -215,12 +229,14 @@ export class Renderer {
 
     _drawBezierSelection(shape) {
         const ctx = this.ctx;
+        const z = this._z ?? 1;
+        const hs = HS / z, n = 0.5 / z;
         // Locked bezier: just show a dashed outline, no editable handles
         if (shape.locked) {
-            const b = shape.getBounds(), pad = 4;
+            const b = shape.getBounds(), pad = 4 / z;
             ctx.save();
-            ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1; ctx.setLineDash([5, 3]);
-            ctx.strokeRect(b.x - pad + 0.5, b.y - pad + 0.5, b.width + pad*2, b.height + pad*2);
+            ctx.strokeStyle = '#0055ff'; ctx.lineWidth = 1 / z; ctx.setLineDash([5 / z, 3 / z]);
+            ctx.strokeRect(b.x - pad + n, b.y - pad + n, b.width + pad*2, b.height + pad*2);
             ctx.restore();
             return;
         }
@@ -240,13 +256,13 @@ export class Renderer {
             if (p.c1x !== p.x || p.c1y !== p.y) {
                 const active = _isActive('c1');
                 ctx.strokeStyle = active ? '#0044dd' : '#0055ff';
-                ctx.lineWidth = active ? 1.5 : 1;
+                ctx.lineWidth = (active ? 1.5 : 1) / z;
                 ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.c1x, p.c1y); ctx.stroke();
 
-                ctx.beginPath(); ctx.arc(p.c1x, p.c1y, active ? 5 : 3.5, 0, Math.PI * 2);
+                ctx.beginPath(); ctx.arc(p.c1x, p.c1y, (active ? 5 : 3.5) / z, 0, Math.PI * 2);
                 if (active) {
                     ctx.fillStyle = 'white'; ctx.fill();
-                    ctx.strokeStyle = '#0044dd'; ctx.lineWidth = 1.5; ctx.stroke();
+                    ctx.strokeStyle = '#0044dd'; ctx.lineWidth = 1.5 / z; ctx.stroke();
                 } else {
                     ctx.fillStyle = '#0055ff'; ctx.fill();
                 }
@@ -256,13 +272,13 @@ export class Renderer {
             if (p.c2x !== p.x || p.c2y !== p.y) {
                 const active = _isActive('c2');
                 ctx.strokeStyle = active ? '#0044dd' : '#0055ff';
-                ctx.lineWidth = active ? 1.5 : 1;
+                ctx.lineWidth = (active ? 1.5 : 1) / z;
                 ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.c2x, p.c2y); ctx.stroke();
 
-                ctx.beginPath(); ctx.arc(p.c2x, p.c2y, active ? 5 : 3.5, 0, Math.PI * 2);
+                ctx.beginPath(); ctx.arc(p.c2x, p.c2y, (active ? 5 : 3.5) / z, 0, Math.PI * 2);
                 if (active) {
                     ctx.fillStyle = 'white'; ctx.fill();
-                    ctx.strokeStyle = '#0044dd'; ctx.lineWidth = 1.5; ctx.stroke();
+                    ctx.strokeStyle = '#0044dd'; ctx.lineWidth = 1.5 / z; ctx.stroke();
                 } else {
                     ctx.fillStyle = '#0055ff'; ctx.fill();
                 }
@@ -270,36 +286,38 @@ export class Renderer {
 
             // Anchor square
             const anchorActive = _isActive('anchor');
-            ctx.lineWidth = 1; ctx.setLineDash([]);
+            ctx.lineWidth = 1 / z; ctx.setLineDash([]);
             if (anchorActive) {
                 ctx.fillStyle = '#0055ff';
-                ctx.fillRect(p.x - HS, p.y - HS, HS*2, HS*2);
+                ctx.fillRect(p.x - hs, p.y - hs, hs*2, hs*2);
                 ctx.strokeStyle = '#003bbf';
             } else {
                 ctx.fillStyle = 'white';
-                ctx.fillRect(p.x - HS, p.y - HS, HS*2, HS*2);
+                ctx.fillRect(p.x - hs, p.y - hs, hs*2, hs*2);
                 ctx.strokeStyle = 'black';
             }
-            ctx.strokeRect(p.x - HS + 0.5, p.y - HS + 0.5, HS*2 - 1, HS*2 - 1);
+            ctx.strokeRect(p.x - hs + n, p.y - hs + n, hs*2 - 1/z, hs*2 - 1/z);
         }
         ctx.restore();
     }
 
     _drawPageMarkers() {
         const { ctx, canvas, state } = this;
+        const z = this._z ?? 1;
+        const lw = canvas.width / z, lh = canvas.height / z;
         const pw = state.pageW, ph = state.pageH;
         ctx.save();
         ctx.strokeStyle = 'rgba(0, 100, 215, 0.5)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([8, 5]);
+        ctx.lineWidth = 1 / z;
+        ctx.setLineDash([8 / z, 5 / z]);
         ctx.beginPath();
-        for (let y = ph; y < canvas.height; y += ph) {
-            const py = Math.round(y) + 0.5;
-            ctx.moveTo(0, py); ctx.lineTo(canvas.width, py);
+        for (let y = ph; y < lh; y += ph) {
+            const py = Math.round(y) + 0.5 / z;
+            ctx.moveTo(0, py); ctx.lineTo(lw, py);
         }
-        for (let x = pw; x < canvas.width; x += pw) {
-            const px = Math.round(x) + 0.5;
-            ctx.moveTo(px, 0); ctx.lineTo(px, canvas.height);
+        for (let x = pw; x < lw; x += pw) {
+            const px = Math.round(x) + 0.5 / z;
+            ctx.moveTo(px, 0); ctx.lineTo(px, lh);
         }
         ctx.stroke();
         ctx.restore();
@@ -307,13 +325,16 @@ export class Renderer {
 
     _drawOriginCrosshair(ox, oy, isPreview) {
         const { ctx, canvas } = this;
+        const z = this._z ?? 1;
+        const lw = canvas.width / z, lh = canvas.height / z;
+        const n = 0.5 / z;
         ctx.save();
         ctx.strokeStyle = isPreview ? 'rgba(0,85,255,0.35)' : 'rgba(0,85,255,0.25)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1 / z;
+        ctx.setLineDash([4 / z, 4 / z]);
         ctx.beginPath();
-        if (ox !== 0) { ctx.moveTo(ox + 0.5, 0); ctx.lineTo(ox + 0.5, canvas.height); }
-        if (oy !== 0) { ctx.moveTo(0, oy + 0.5); ctx.lineTo(canvas.width, oy + 0.5); }
+        if (ox !== 0) { ctx.moveTo(ox + n, 0); ctx.lineTo(ox + n, lh); }
+        if (oy !== 0) { ctx.moveTo(0, oy + n); ctx.lineTo(lw, oy + n); }
         ctx.stroke();
         ctx.restore();
     }

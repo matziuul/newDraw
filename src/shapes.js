@@ -101,31 +101,34 @@ export function getHandlePoints(b) {
     ];
 }
 
-export function hitTestHandle(px, py, bounds) {
+export function hitTestHandle(px, py, bounds, zoom = 1) {
+    const hs = HS / zoom;
     for (const h of getHandlePoints(bounds)) {
-        if (Math.abs(px - h.x) <= HS && Math.abs(py - h.y) <= HS) return h.id;
+        if (Math.abs(px - h.x) <= hs && Math.abs(py - h.y) <= hs) return h.id;
     }
     return null;
 }
 
 // Returns 0 (start handle), 1 (end handle), or null.
-export function hitTestArcHandle(px, py, shape) {
+export function hitTestArcHandle(px, py, shape, zoom = 1) {
+    const r = (HS + 2) / zoom;
     const pts = shape.getArcHandlePositions();
     for (let i = 0; i < pts.length; i++) {
-        if (Math.hypot(px - pts[i].x, py - pts[i].y) <= HS + 2) return i;
+        if (Math.hypot(px - pts[i].x, py - pts[i].y) <= r) return i;
     }
     return null;
 }
 
-export function hitTestBezierHandle(px, py, shape) {
-    const CR = 6; // hit radius for control-point circles
+export function hitTestBezierHandle(px, py, shape, zoom = 1) {
+    const hs = HS / zoom;
+    const cr = 6 / zoom;
     for (let i = 0; i < shape.points.length; i++) {
         const p = shape.points[i];
-        if (Math.abs(px - p.x) <= HS && Math.abs(py - p.y) <= HS)
+        if (Math.abs(px - p.x) <= hs && Math.abs(py - p.y) <= hs)
             return { pointIdx: i, role: 'anchor' };
-        if ((p.c2x !== p.x || p.c2y !== p.y) && Math.hypot(px - p.c2x, py - p.c2y) <= CR)
+        if ((p.c2x !== p.x || p.c2y !== p.y) && Math.hypot(px - p.c2x, py - p.c2y) <= cr)
             return { pointIdx: i, role: 'c2' };
-        if ((p.c1x !== p.x || p.c1y !== p.y) && Math.hypot(px - p.c1x, py - p.c1y) <= CR)
+        if ((p.c1x !== p.x || p.c1y !== p.y) && Math.hypot(px - p.c1x, py - p.c1y) <= cr)
             return { pointIdx: i, role: 'c1' };
     }
     return null;

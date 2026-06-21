@@ -26,6 +26,8 @@ export class Ruler {
         const h = isH ? 20 : this.vCanvas.height;
         const lenPx = isH ? w : h;
         const ox = isH ? (this.state.rulerOriginX || 0) : (this.state.rulerOriginY || 0);
+        const zoom = this.state.zoom || 1;
+        const logLen = lenPx / zoom;   // logical document length in pixels
         const off = document.createElement('canvas');
         off.width = w; off.height = h;
         const ctx = off.getContext('2d');
@@ -34,11 +36,11 @@ export class Ruler {
         ctx.fillRect(0, 0, w, h);
 
         if (this.state.rulerUnit === 'mm') {
-            // canvas pixel for mm value m: px = m * PX_PER_MM + ox
+            // physical canvas pixel for mm value m: px = (m * PX_PER_MM + ox) * zoom
             const vmin = Math.floor(-ox / PX_PER_MM);
-            const vmax = Math.ceil((lenPx - ox) / PX_PER_MM);
+            const vmax = Math.ceil((logLen - ox) / PX_PER_MM);
             for (let mm = vmin; mm <= vmax; mm++) {
-                const px = mm * PX_PER_MM + ox;
+                const px = (mm * PX_PER_MM + ox) * zoom;
                 if (px < 0 || px > lenPx) continue;
                 const big = mm % 10 === 0, mid = mm % 5 === 0;
                 const tick = big ? 13 : mid ? 8 : 4;
@@ -68,11 +70,11 @@ export class Ruler {
             }
         } else if (this.state.rulerUnit === 'in') {
             // 1" = 96px; subdivide to 1/8" (12px) steps
-            const stepPx = PX_PER_IN / 8; // 12px
+            const stepPx = PX_PER_IN / 8; // 12px logical
             const firstI = Math.ceil(-ox / stepPx);
-            const lastI  = Math.floor((lenPx - ox) / stepPx);
+            const lastI  = Math.floor((logLen - ox) / stepPx);
             for (let i = firstI; i <= lastI; i++) {
-                const px = i * stepPx + ox;
+                const px = (i * stepPx + ox) * zoom;
                 if (px < 0 || px > lenPx) continue;
                 const isIn   = i % 8 === 0;
                 const isHalf = i % 4 === 0;
@@ -102,11 +104,11 @@ export class Ruler {
                 }
             }
         } else {
-            // canvas pixel for value v: px = v + ox
+            // canvas pixel for value v: physical px = (v + ox) * zoom
             const firstTick = Math.ceil(-ox / 10) * 10;
-            const lastTick  = Math.floor((lenPx - ox) / 10) * 10;
+            const lastTick  = Math.floor((logLen - ox) / 10) * 10;
             for (let v = firstTick; v <= lastTick; v += 10) {
-                const px = v + ox;
+                const px = (v + ox) * zoom;
                 if (px < 0 || px > lenPx) continue;
                 const big = v % 100 === 0, mid = v % 50 === 0;
                 const tick = big ? 13 : mid ? 8 : 4;
@@ -152,30 +154,31 @@ export class Ruler {
         const ox = this.state.rulerOriginX || 0;
         const oy = this.state.rulerOriginY || 0;
         const preview = this.state.rulerDragOrigin;
+        const zoom = this.state.zoom || 1;
 
         this.hCtx.drawImage(this._hStatic, 0, 0);
-        // Origin marker: small downward triangle on horizontal ruler
-        const hx = preview ? preview.x : ox;
+        const hx = (preview ? preview.x : ox) * zoom;
         if (hx > 0) this._drawOriginMarker(this.hCtx, 'h', hx, !!preview);
         if (this.mx >= 0) {
+            const pmx = this.mx * zoom;
             this.hCtx.strokeStyle = 'rgba(0,85,255,0.75)';
             this.hCtx.lineWidth = 1;
             this.hCtx.beginPath();
-            this.hCtx.moveTo(this.mx + 0.5, 0);
-            this.hCtx.lineTo(this.mx + 0.5, 20);
+            this.hCtx.moveTo(pmx + 0.5, 0);
+            this.hCtx.lineTo(pmx + 0.5, 20);
             this.hCtx.stroke();
         }
 
         this.vCtx.drawImage(this._vStatic, 0, 0);
-        // Origin marker: small rightward triangle on vertical ruler
-        const vy = preview ? preview.y : oy;
+        const vy = (preview ? preview.y : oy) * zoom;
         if (vy > 0) this._drawOriginMarker(this.vCtx, 'v', vy, !!preview);
         if (this.my >= 0) {
+            const pmy = this.my * zoom;
             this.vCtx.strokeStyle = 'rgba(0,85,255,0.75)';
             this.vCtx.lineWidth = 1;
             this.vCtx.beginPath();
-            this.vCtx.moveTo(0, this.my + 0.5);
-            this.vCtx.lineTo(20, this.my + 0.5);
+            this.vCtx.moveTo(0, pmy + 0.5);
+            this.vCtx.lineTo(20, pmy + 0.5);
             this.vCtx.stroke();
         }
     }
