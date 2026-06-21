@@ -131,9 +131,13 @@ function setupCanvasSizeDialog() {
     });
 
     return () => {
-        inpW.value = canvas.width;
-        inpH.value = canvas.height;
-        selPreset.value = '';
+        const logW = Math.round(canvas.width / (state.zoom ?? 1));
+        const logH = Math.round(canvas.height / (state.zoom ?? 1));
+        inpW.value = logW;
+        inpH.value = logH;
+        const matchPreset = Object.keys(PAPER_SIZES).find(k =>
+            PAPER_SIZES[k].w === logW && PAPER_SIZES[k].h === logH);
+        selPreset.value = matchPreset ?? '';
         const curKey = Object.keys(PAPER_SIZES).find(k =>
             PAPER_SIZES[k].w === state.pageW && PAPER_SIZES[k].h === state.pageH);
         selMark.value = curKey ?? '';
@@ -265,5 +269,5 @@ if (rulerCorner) {
     });
 }
 
-applyZoom(currentZoom);
+applyZoom(state.zoom);
 renderer.render();

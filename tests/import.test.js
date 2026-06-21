@@ -735,10 +735,10 @@ describe('16rect.pict — 4×4 rectangle grid', () => {
             expect(result.shapes[col].strokePatternIdx).toBe(3);
         }
     });
-    it('rows 1–3 (fill+frame, 12 shapes) have grey stroke (pattern index 5 = grå)', () => {
+    it('rows 1–3 (fill+frame, 12 shapes) have black stroke (pattern index 3 = svart, no PnPat opcode in file)', () => {
         for (let row = 1; row < 4; row++) {
             for (let col = 0; col < 4; col++) {
-                expect(result.shapes[row * 4 + col].strokePatternIdx).toBe(5);
+                expect(result.shapes[row * 4 + col].strokePatternIdx).toBe(3);
             }
         }
     });

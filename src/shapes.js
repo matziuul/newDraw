@@ -568,6 +568,86 @@ export class GroupShape {
     }
 }
 
+// ─── Shape transforms ─────────────────────────────────────────────────────────
+
+export function applyTransform(shape, op) {
+    const b  = shape.getSelectionBounds?.() ?? shape.getBounds();
+    const cx = b.x + b.width  / 2;
+    const cy = b.y + b.height / 2;
+    const fn = _makeTransformFn(op, cx, cy);
+    _applyTransformFn(shape, fn, op);
+}
+
+function _makeTransformFn(op, cx, cy) {
+    if (op === 'flipH')      return (x, y) => ({ x: 2 * cx - x, y });
+    if (op === 'flipV')      return (x, y) => ({ x, y: 2 * cy - y });
+    if (op === 'rotate90CW') return (x, y) => ({ x: cx + (y - cy), y: cy - (x - cx) });
+    /* rotate90CCW */        return (x, y) => ({ x: cx - (y - cy), y: cy + (x - cx) });
+}
+
+function _applyTransformFn(shape, fn, op = null) {
+    if (shape.type === 'line') {
+        const p1 = fn(shape.x1, shape.y1), p2 = fn(shape.x2, shape.y2);
+        shape.x1 = p1.x; shape.y1 = p1.y; shape.x2 = p2.x; shape.y2 = p2.y;
+
+    } else if (shape.type === 'bezier') {
+        for (const p of shape.points) {
+            const a = fn(p.x, p.y), c1 = fn(p.c1x, p.c1y), c2 = fn(p.c2x, p.c2y);
+            p.x = a.x; p.y = a.y; p.c1x = c1.x; p.c1y = c1.y; p.c2x = c2.x; p.c2y = c2.y;
+        }
+
+    } else if (shape.type === 'group') {
+        for (const child of shape.children) _applyTransformFn(child, fn, op);
+
+    } else if (shape.type === 'text') {
+        const p = fn(shape.x, shape.y);
+        shape.x = p.x; shape.y = p.y;
+
+    } else if (shape.type === 'arc') {
+        // Transform the visible quadrant's bounding box, then remap quadrant and recompute
+        // the full ellipse. Quadrant mapping per operation:
+        //   flipH:       Q0↔Q3, Q1↔Q2  → 3-q
+        //   flipV:       Q0↔Q1, Q2↔Q3  → q^1
+        //   rotate90CW:  Q0→Q3→Q2→Q1→  → (q+3)%4
+        //   rotate90CCW: Q0→Q1→Q2→Q3→  → (q+1)%4
+        const sb = shape.getSelectionBounds();
+        const corners = [
+            fn(sb.x,             sb.y),
+            fn(sb.x + sb.width,  sb.y),
+            fn(sb.x,             sb.y + sb.height),
+            fn(sb.x + sb.width,  sb.y + sb.height),
+        ];
+        const xs = corners.map(c => c.x), ys = corners.map(c => c.y);
+        const vx = Math.min(...xs), vy = Math.min(...ys);
+        const vw = Math.max(...xs) - vx, vh = Math.max(...ys) - vy;
+        const q = shape.quadrant;
+        if (op === 'flipH')           shape.quadrant = 3 - q;
+        else if (op === 'flipV')      shape.quadrant = q ^ 1;
+        else if (op === 'rotate90CW') shape.quadrant = (q + 3) % 4;
+        else                          shape.quadrant = (q + 1) % 4; // rotate90CCW
+        const nq = shape.quadrant;
+        shape.x = (nq === 0 || nq === 1) ? vx - vw : vx;
+        shape.y = (nq === 1 || nq === 2) ? vy - vh : vy;
+        shape.width = 2 * vw; shape.height = 2 * vh;
+        delete shape.startAngleDeg;
+        delete shape.arcAngleDeg;
+
+    } else {
+        // rect / ellipse / roundrect: transform corners → new axis-aligned bounding box
+        const corners = [
+            fn(shape.x,               shape.y),
+            fn(shape.x + shape.width, shape.y),
+            fn(shape.x,               shape.y + shape.height),
+            fn(shape.x + shape.width, shape.y + shape.height),
+        ];
+        const xs = corners.map(c => c.x), ys = corners.map(c => c.y);
+        shape.x      = Math.min(...xs);
+        shape.y      = Math.min(...ys);
+        shape.width  = Math.max(...xs) - shape.x;
+        shape.height = Math.max(...ys) - shape.y;
+    }
+}
+
 export class TextShape {
     constructor(x, y, text = '', fontFamily = 'Geneva', fontSize = 12, fontStyle = 0) {
         this.id = nextUid(); this.type = 'text';

@@ -38,6 +38,7 @@ function serializeShape(shape) {
             return { ...base,
                 x: shape.x, y: shape.y, width: shape.width, height: shape.height,
                 quadrant: shape.quadrant,
+                startAngleDeg: shape.startAngleDeg, arcAngleDeg: shape.arcAngleDeg,
                 fillIdx: shape.fillIdx, strokeWidth: shape.strokeWidth,
                 strokeDash: shape.strokeDash, strokePatternIdx: shape.strokePatternIdx };
         case 'group':
@@ -79,6 +80,8 @@ function deserializeShape(data) {
         case 'arc':
             shape = new ArcShape(data.x, data.y, data.width, data.height);
             shape.quadrant = data.quadrant ?? 1;
+            if (data.startAngleDeg !== undefined) shape.startAngleDeg = data.startAngleDeg;
+            if (data.arcAngleDeg   !== undefined) shape.arcAngleDeg   = data.arcAngleDeg;
             break;
         case 'group':
             shape = new GroupShape(data.children.map(deserializeShape));
@@ -139,7 +142,7 @@ export function loadDocument(buffer) {
     if (typeof data.version !== 'number') throw new Error('Not a MacDraw document');
     if (data.version !== FORMAT_VERSION)  throw new Error(`Unsupported version: ${data.version}`);
     const shapes = (data.shapes ?? []).map(deserializeShape);
-    const maxId = Math.max(0, ...shapes.flatMap(collectIds));
+    const maxId = Math.max(0, ...shapes.flatMap(collectIds).filter(Number.isFinite));
     seedUid(maxId);
     return { shapes, canvasWidth: data.canvasWidth, canvasHeight: data.canvasHeight };
 }

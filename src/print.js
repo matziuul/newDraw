@@ -1,6 +1,15 @@
 import { QD_PATTERNS, buildPattern } from './patterns.js';
 import { normalize, STROKE_DASHES, ARROW_MODES } from './shapes.js';
 
+function flattenShapes(shapes) {
+    const out = [];
+    for (const s of shapes) {
+        if (s.type === 'group') out.push(...flattenShapes(s.children));
+        else out.push(s);
+    }
+    return out;
+}
+
 function buildFillsImage(shapes, width, height) {
     const canvas = document.createElement('canvas');
     canvas.width = width; canvas.height = height;
@@ -149,16 +158,29 @@ function shapeToSvg(shape) {
         }
         return `<path d="${d}" fill="none" ${strokeAttr(shape)} stroke-width="${shape.strokeWidth}"${dashAttr(shape)}${arrowAttr(shape)} stroke-linecap="round" stroke-linejoin="round"/>`;
     }
+    if (shape.type === 'group') {
+        return shape.children.map(shapeToSvg).filter(Boolean).join('\n  ');
+    }
+    if (shape.type === 'text') {
+        const styles = [];
+        if (shape.fontFamily) styles.push(`font-family="${shape.fontFamily}"`);
+        if (shape.fontSize)   styles.push(`font-size="${shape.fontSize}px"`);
+        if (shape.fontStyle & 1) styles.push('font-weight="bold"');
+        if (shape.fontStyle & 2) styles.push('font-style="italic"');
+        const safe = (shape.text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return `<text x="${shape.x}" y="${shape.y + (shape.fontSize ?? 12)}" ${styles.join(' ')} fill="black">${safe}</text>`;
+    }
     return '';
 }
 
 export function buildSvg(shapes, width, height) {
-    const hasFills = shapes.some(s => QD_PATTERNS[s.fillIdx]?.rows !== null);
+    const flat = flattenShapes(shapes);
+    const hasFills = flat.some(s => QD_PATTERNS[s.fillIdx]?.rows !== null);
     const fillsLayer = hasFills
-        ? `<image href="${buildFillsImage(shapes, width, height)}" width="${width}" height="${height}"/>`
+        ? `<image href="${buildFillsImage(flat, width, height)}" width="${width}" height="${height}"/>`
         : '';
-    const defs = buildDefs(shapes);
-    const body = shapes.map(shapeToSvg).join('\n  ');
+    const defs = buildDefs(flat);
+    const body = shapes.map(shapeToSvg).filter(Boolean).join('\n  ');
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">\n  ${defs}\n  ${fillsLayer}\n  ${body}\n</svg>`;
 }
 

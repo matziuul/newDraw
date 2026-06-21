@@ -711,7 +711,7 @@ export class ToolController {
             this.state.rubberBand = null;
             if (rb && (rb.w > 4 || rb.h > 4)) {
                 const found = this.state.shapes.filter(s => {
-                    const b = s.getBounds();
+                    const b = s.getSelectionBounds?.() ?? s.getBounds();
                     return b.x < rb.x + rb.w && b.x + b.width  > rb.x &&
                            b.y < rb.y + rb.h && b.y + b.height > rb.y;
                 });
@@ -800,6 +800,31 @@ export class ToolController {
                 this.renderer.render();
                 return;
             }
+            // Bezier anchor double-click: toggle corner ↔ smooth
+            if (sel?.type === 'bezier' && !sel.locked) {
+                const bh = hitTestBezierHandle(raw.x, raw.y, sel, this.state.zoom ?? 1);
+                if (bh?.role === 'anchor') {
+                    e.preventDefault();
+                    const snap = this.history.savePreOp();
+                    const pts = sel.points, i = bh.pointIdx, n = pts.length, p = pts[i];
+                    const isCorner = p.c1x === p.x && p.c1y === p.y && p.c2x === p.x && p.c2y === p.y;
+                    if (isCorner) {
+                        // Compute Catmull-Rom tangent from neighbours
+                        let tx, ty;
+                        if (i === 0)       { tx = pts[1].x - p.x;                   ty = pts[1].y - p.y; }
+                        else if (i === n-1){ tx = p.x - pts[n-2].x;                 ty = p.y - pts[n-2].y; }
+                        else               { tx = (pts[i+1].x - pts[i-1].x) / 2;    ty = (pts[i+1].y - pts[i-1].y) / 2; }
+                        p.c1x = p.x - tx / 3; p.c1y = p.y - ty / 3;
+                        p.c2x = p.x + tx / 3; p.c2y = p.y + ty / 3;
+                    } else {
+                        p.c1x = p.x; p.c1y = p.y;
+                        p.c2x = p.x; p.c2y = p.y;
+                    }
+                    this.history.commit(snap);
+                    this._update();
+                    return;
+                }
+            }
         }
         // Bezier: finish drawing on double-click
         const d = this.state.currentDraft;
@@ -868,26 +893,31 @@ export class ToolController {
         if (!el || el.style.display === 'none') return;
         const text = (el.innerText ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
         el.style.display = 'none';
-        const snap = this.history.savePreOp();
-        if (this.editingTextShape) {
-            if (text.trim() === '') {
-                this.state.shapes = this.state.shapes.filter(s => s.id !== this.editingTextShape.id);
-                this.state.selectedId = null;
-            } else {
-                this.editingTextShape.text = text;
+
+        const unchanged = this.editingTextShape && text === this.editingTextShape.text;
+        if (!unchanged) {
+            const snap = this.history.savePreOp();
+            if (this.editingTextShape) {
+                if (text.trim() === '') {
+                    this.state.shapes = this.state.shapes.filter(s => s.id !== this.editingTextShape.id);
+                    this.state.selectedId = null;
+                } else {
+                    this.editingTextShape.text = text;
+                }
+            } else if (text.trim() !== '') {
+                const shape = new TextShape(
+                    this.editingTextPos.x, this.editingTextPos.y, text,
+                    this.state.activeFont, this.state.activeFontSize, this.state.activeFontStyle
+                );
+                this.state.shapes.push(shape);
+                this.state.selectedId = shape.id;
             }
-        } else if (text.trim() !== '') {
-            const shape = new TextShape(
-                this.editingTextPos.x, this.editingTextPos.y, text,
-                this.state.activeFont, this.state.activeFontSize, this.state.activeFontStyle
-            );
-            this.state.shapes.push(shape);
-            this.state.selectedId = shape.id;
+            this.history.commit(snap);
         }
+
         this.editingTextShape = null;
         this.editingTextPos   = null;
         this.state.editingTextId = null;
-        this.history.commit(snap);
         this._update();
     }
 
