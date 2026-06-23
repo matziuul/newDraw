@@ -1,6 +1,12 @@
 import { PX_PER_MM, PX_PER_IN } from './state.js';
 
+/** Renders the horizontal and vertical rulers flanking the canvas, including tick marks, labels, and the cursor position hairline. */
 export class Ruler {
+    /**
+     * @param {HTMLCanvasElement} hCanvas - The horizontal ruler canvas element.
+     * @param {HTMLCanvasElement} vCanvas - The vertical ruler canvas element.
+     * @param {object} state - Shared application state providing zoom, unit, and ruler origin values.
+     */
     constructor(hCanvas, vCanvas, state) {
         this.hCanvas = hCanvas;
         this.vCanvas = vCanvas;
@@ -14,12 +20,23 @@ export class Ruler {
         this.render();
     }
 
+    /**
+     * Regenerates the static ruler bitmaps and re-renders both rulers.
+     * Call this when the canvas size, zoom level, ruler unit, or origin changes.
+     */
     rebuild() {
         this._hStatic = this._buildStatic('h');
         this._vStatic = this._buildStatic('v');
         this.render();
     }
 
+    /**
+     * Draws tick marks and numeric labels for one ruler axis into an off-screen canvas.
+     * The result is cached and composited during each {@link render} call for performance.
+     * Supports three unit modes: 'mm', 'in', and pixels (default).
+     * @param {'h'|'v'} axis - Which ruler to build: 'h' for horizontal, 'v' for vertical.
+     * @returns {HTMLCanvasElement} Off-screen canvas with the static ruler content drawn on it.
+     */
     _buildStatic(axis) {
         const isH = axis === 'h';
         const w = isH ? this.hCanvas.width : 20;
@@ -148,8 +165,18 @@ export class Ruler {
         return off;
     }
 
+    /**
+     * Updates the cursor position used to draw the hairline crosshair on the rulers.
+     * Pass negative values to hide the hairline.
+     * @param {number} x - Logical (unzoomed) x coordinate of the cursor on the canvas.
+     * @param {number} y - Logical (unzoomed) y coordinate of the cursor on the canvas.
+     */
     setMouse(x, y) { this.mx = x; this.my = y; }
 
+    /**
+     * Composites the static ruler bitmap, the origin marker triangle, and the cursor hairline
+     * onto both ruler canvases. Should be called whenever the cursor moves or the view changes.
+     */
     render() {
         const ox = this.state.rulerOriginX || 0;
         const oy = this.state.rulerOriginY || 0;
@@ -183,6 +210,14 @@ export class Ruler {
         }
     }
 
+    /**
+     * Draws a small filled triangle on a ruler to indicate the ruler origin position.
+     * The triangle points inward (down on horizontal, right on vertical).
+     * @param {CanvasRenderingContext2D} ctx - Rendering context of the ruler canvas.
+     * @param {'h'|'v'} axis - Which ruler is being drawn on.
+     * @param {number} pos - Physical pixel position (already scaled by zoom) along the ruler.
+     * @param {boolean} isPreview - When true, renders the marker semi-transparent to indicate a drag-in-progress.
+     */
     _drawOriginMarker(ctx, axis, pos, isPreview) {
         ctx.save();
         ctx.fillStyle = isPreview ? 'rgba(0,85,255,0.45)' : 'rgba(0,85,255,0.75)';

@@ -6,7 +6,22 @@ import {
 import { fontCss } from './text-defs.js';
 import { printDrawing } from './print.js';
 
+/**
+ * Coordinates all user interaction with the drawing canvas: mouse-based shape creation
+ * and editing, keyboard shortcuts, tool switching, selection, and text entry. Acts as
+ * the single point of truth for drag state and dispatches work to the renderer and
+ * history manager.
+ */
 export class ToolController {
+    /**
+     * @param {object} state - Shared application state (shapes, selected IDs, active tool, etc.).
+     * @param {object} renderer - Renders the canvas after each state change.
+     * @param {object} history - Undo/redo manager; provides savePreOp/commit/undo/redo.
+     * @param {object} ruler - Ruler overlay that tracks the current mouse position.
+     * @param {HTMLCanvasElement} canvas - The drawing surface all mouse events attach to.
+     * @param {object|null} toolbar - Toolbar UI reference for syncing active tool display.
+     * @param {HTMLElement|null} textInput - Contenteditable overlay used for text entry.
+     */
     constructor(state, renderer, history, ruler, canvas, toolbar, textInput) {
         this.state = state;
         this.renderer = renderer;
@@ -35,6 +50,10 @@ export class ToolController {
         this._attachEvents();
     }
 
+    /**
+     * Registers all canvas and document event listeners for mouse interaction,
+     * keyboard shortcuts, and text-overlay behaviour. Called once from the constructor.
+     */
     _attachEvents() {
         this.canvas.addEventListener('mousedown',  e => this._onDown(e));
         this.canvas.addEventListener('mousemove',  e => this._onMove(e));
@@ -58,6 +77,12 @@ export class ToolController {
         }
     }
 
+    /**
+     * Converts a mouse event's client coordinates to canvas-space coordinates,
+     * accounting for the current zoom level.
+     * @param {MouseEvent} e
+     * @returns {{ x: number, y: number }}
+     */
     _pos(e) {
         const r = this.canvas.getBoundingClientRect();
         const z = this.state.zoom ?? 1;
@@ -67,8 +92,14 @@ export class ToolController {
         };
     }
 
+    /** Re-runs the full UI sync (status bar, toolbar, inspector, render). Public entry point for external callers. */
     syncUI() { this._update(); }
 
+    /**
+     * Applies the font, size, weight, style, and line-height of the currently edited
+     * text shape (or the active font settings if creating a new shape) to the text-input
+     * overlay element so it renders identically to the canvas text.
+     */
     syncOverlayStyle() {
         const el = this.textInput;
         if (!el || el.style.display === 'none') return;
@@ -84,6 +115,12 @@ export class ToolController {
         el.style.lineHeight     = Math.ceil(fontSize * 1.25) + 'px';
     }
 
+    /**
+     * Syncs the status bar (position and size readouts), toolbar, and inspector to
+     * reflect the current selection, then triggers a canvas redraw. Also mirrors the
+     * selected shape's fill/stroke/font settings back into the active-tool state so
+     * the next shape drawn inherits the same style.
+     */
     _update() {
         const sel = this.state.selectedShape;
         const multi = this.state.selectedIds.length > 1;
@@ -125,28 +162,62 @@ export class ToolController {
         this.renderer.render();
     }
 
+    /**
+     * Snaps a canvas-space point to the nearest grid intersection when grid-snapping is on.
+     * Returns the point unchanged when snapping is off.
+     * @param {{ x: number, y: number }} param0
+     * @returns {{ x: number, y: number }}
+     */
     _snapPos({ x, y }) {
         if (!this.state.snapToGrid) return { x, y };
         const g = this.state.gridStep;
         return { x: Math.round(x / g) * g, y: Math.round(y / g) * g };
     }
 
+    /**
+     * Snaps a single numeric coordinate value to the nearest grid step when grid-snapping is on.
+     * @param {number} v - Coordinate in canvas pixels.
+     * @returns {number}
+     */
     _snapVal(v) {
         if (!this.state.snapToGrid) return v;
         const g = this.state.gridStep;
         return Math.round(v / g) * g;
     }
 
+    /**
+     * Formats a pixel measurement as a display string in the current ruler unit
+     * (pixels as a rounded integer, or millimetres to one decimal place).
+     * @param {number} px - Measurement in canvas pixels.
+     * @returns {string}
+     */
     _fmt(px) {
         if (this.state.rulerUnit === 'mm') return (px * 25.4 / 96).toFixed(1);
         return String(Math.round(px));
     }
 
+    /** Returns the unit suffix string (' mm' or '') for the current ruler unit setting. */
     _fmtUnit() { return this.state.rulerUnit === 'mm' ? ' mm' : ''; }
 
+    /**
+     * Formats an X coordinate relative to the ruler origin.
+     * @param {number} px - Absolute canvas X position.
+     * @returns {string}
+     */
     _fmtX(px) { return this._fmt(px - (this.state.rulerOriginX || 0)); }
+    /**
+     * Formats a Y coordinate relative to the ruler origin.
+     * @param {number} py - Absolute canvas Y position.
+     * @returns {string}
+     */
     _fmtY(py) { return this._fmt(py - (this.state.rulerOriginY || 0)); }
 
+    /**
+     * Handles document-level keydown events for global shortcuts: undo/redo, copy,
+     * paste, duplicate, delete, print, bezier finish (Enter), and Escape to cancel
+     * or deselect. Suppressed while any text input is focused (except Escape).
+     * @param {KeyboardEvent} e
+     */
     _onKey(e) {
         // Don't intercept keys while any text input is focused
         const active = document.activeElement;
@@ -258,6 +329,12 @@ export class ToolController {
         }
     }
 
+    /**
+     * Dispatches a canvas mousedown event to the appropriate handler based on the
+     * currently active tool: text placement, selection/resize/move, bezier point
+     * addition, or shape drawing.
+     * @param {MouseEvent} e
+     */
     _onDown(e) {
         const raw = this._pos(e);
         if (this.state.activeTool === 'text') {
@@ -272,6 +349,13 @@ export class ToolController {
         else this._drawDown(this._snapPos(raw), this.state.activeTool);
     }
 
+    /**
+     * Handles mousedown logic when the select tool is active. Determines what was
+     * clicked and sets the appropriate drag mode: arc-handle drag, bezier-handle drag,
+     * resize-handle drag, single-shape move, multi-shape move, or rubber-band selection
+     * on empty canvas.
+     * @param {{ x: number, y: number }} pos - Snapped canvas position.
+     */
     _selectDown(pos) {
         const state = this.state;
         const sel   = state.selectedShape;
@@ -368,6 +452,12 @@ export class ToolController {
         this._update();
     }
 
+    /**
+     * Begins drawing a new shape by initialising the current draft and entering draw
+     * drag mode. Called when a non-select, non-bezier, non-text tool is pressed down.
+     * @param {{ x: number, y: number }} pos - Snapped canvas start position.
+     * @param {string} tool - Active tool name (e.g. 'rectangle', 'ellipse', 'line').
+     */
     _drawDown(pos, tool) {
         this.preOpSnapshot = this.history.savePreOp();
         this.startX = pos.x; this.startY = pos.y;
@@ -378,6 +468,14 @@ export class ToolController {
             : { type: tool, x: pos.x, y: pos.y, width: 0, height: 0 };
     }
 
+    /**
+     * Handles canvas mousemove events. Updates the ruler and status bar with the
+     * current position, then delegates to the appropriate drag handler based on
+     * the current drag mode (draw, move, moveMany, rubber-band, resize, bezier handle,
+     * or arc handle). Also handles live bezier control-handle dragging via the
+     * bezierDragging flag.
+     * @param {MouseEvent} e
+     */
     _onMove(e) {
         const rawPos = this._pos(e);
         this.ruler.setMouse(rawPos.x, rawPos.y);
@@ -492,6 +590,12 @@ export class ToolController {
         this.renderer.render();
     }
 
+    /**
+     * Applies a resize transformation to the selected shape during a handle drag. Handles
+     * cardinal and corner handles for lines, arcs, and all box-type shapes. Arc resizing
+     * operates on the visible quadrant bounding box and expands back to the full ellipse.
+     * @param {{ x: number, y: number }} pos - Current snapped canvas position.
+     */
     _applyResize(pos) {
         const shape = this.state.selectedShape, orig = this.originShape;
         if (!shape || !orig || shape.type === 'bezier') return;
@@ -538,6 +642,13 @@ export class ToolController {
         if (h.includes('s')) { shape.height = this._snapVal(orig.y + orig.height + dy) - shape.y; }
     }
 
+    /**
+     * Updates the selected arc's start and end angles while the user drags one of its
+     * endpoint handles. The opposite endpoint is kept fixed; the quadrant field is
+     * updated so resize handles remain correct. Angles are in the Mac convention
+     * (0° = 12 o'clock, clockwise).
+     * @param {{ x: number, y: number }} pos - Current raw (unsnapped) canvas position.
+     */
     _applyArcHandleDrag(pos) {
         const shape = this.state.selectedShape;
         const orig  = this.originShape;
@@ -571,6 +682,12 @@ export class ToolController {
         shape.quadrant = Math.min(3, Math.floor(mid / 90));
     }
 
+    /**
+     * Moves a bezier anchor or control-point handle during a drag. Anchors move the
+     * point and both its control handles together; dragging one control handle mirrors
+     * the opposite handle to maintain tangent continuity.
+     * @param {{ x: number, y: number }} rawPos - Current raw (unsnapped) canvas position.
+     */
     _applyBezierHandleDrag(rawPos) {
         const shape = this.state.selectedShape, orig = this.originShape;
         if (!shape || !orig) return;
@@ -594,6 +711,12 @@ export class ToolController {
         }
     }
 
+    /**
+     * Refreshes the position and size readouts in the status bar while a drag is in
+     * progress. Shows draft dimensions for shape drawing, or the selected shape's
+     * bounds for move/resize operations.
+     * @param {{ x: number, y: number }} pos - Current snapped canvas position.
+     */
     _updateStatusWhileDragging(pos) {
         const d = this.state.currentDraft;
         const u = this._fmtUnit();
@@ -615,6 +738,13 @@ export class ToolController {
         this.inspector?.sync();
     }
 
+    /**
+     * Sets the canvas cursor to reflect what is under the pointer when not dragging:
+     * text cursor over the text tool, crosshair for drawing tools, and for the select
+     * tool — resize/move cursors over handles, move over shape bodies, pointer over
+     * unselected shapes, and default over empty canvas.
+     * @param {{ x: number, y: number }} pos - Current raw canvas position.
+     */
     _updateCursor(pos) {
         if (this.state.activeTool === 'text') { this.canvas.style.cursor = 'text'; return; }
         if (this.state.activeTool !== 'select') { this.canvas.style.cursor = 'crosshair'; return; }
@@ -660,6 +790,12 @@ export class ToolController {
         this.canvas.style.cursor = 'default';
     }
 
+    /**
+     * Handles mouseup (and mouseleave) to end the current drag operation. Commits the
+     * undo snapshot for draw, move, resize, and handle-drag operations; resolves the
+     * rubber-band selection into selectedId/selectedIds; and updates the duplicate-offset
+     * tracking when a recently duplicated shape is moved. Resets all drag state.
+     */
     _onUp() {
         if (this.bezierDragging) { this.bezierDragging = false; this.renderer.render(); return; }
         if (!this.isDragging) return;
@@ -755,6 +891,12 @@ export class ToolController {
         this._update();
     }
 
+    /**
+     * Adds a new anchor point to the in-progress bezier path on each click. Starts a
+     * fresh draft on the first click and appends subsequent points, then enters bezier-
+     * dragging mode so the immediately following mousemove can set the control handles.
+     * @param {{ x: number, y: number }} pos - Snapped canvas position for the new point.
+     */
     _bezierDown(pos) {
         const pt = { x: pos.x, y: pos.y, c1x: pos.x, c1y: pos.y, c2x: pos.x, c2y: pos.y };
         const d = this.state.currentDraft;
@@ -768,6 +910,11 @@ export class ToolController {
         this.renderer.render();
     }
 
+    /**
+     * Finalises the bezier path being drawn, creating a BezierShape from the accumulated
+     * draft points if at least two points exist. Applies the active style settings,
+     * commits to history, and resets to the select tool unless tool-sticky mode is on.
+     */
     _finishBezier() {
         const d = this.state.currentDraft;
         if (!d || d.type !== 'bezier') return;
@@ -789,6 +936,13 @@ export class ToolController {
         this._update();
     }
 
+    /**
+     * Handles canvas double-click events. With the select tool: enters text-edit mode
+     * when a text shape is double-clicked, or toggles a bezier anchor between corner
+     * and smooth using a Catmull-Rom tangent estimate. While drawing a bezier path:
+     * finalises the path (removing the duplicate point the second mousedown added).
+     * @param {MouseEvent} e
+     */
     _onDblClick(e) {
         // Text shape double-click with select tool → enter edit mode
         if (this.state.activeTool === 'select') {
@@ -835,6 +989,12 @@ export class ToolController {
         this._finishBezier();
     }
 
+    /**
+     * Handles a mousedown while the text tool is active. Commits any open text edit,
+     * then either opens the overlay on an existing text shape (if one was clicked) or
+     * starts a new text placement at the clicked position.
+     * @param {{ x: number, y: number }} pos - Raw (unsnapped) canvas position.
+     */
     _textDown(pos) {
         this._commitText(); // commit any existing edit first
         // Check for an existing text shape at this position
@@ -855,6 +1015,16 @@ export class ToolController {
         this.renderer.render();
     }
 
+    /**
+     * Positions and shows the contenteditable text-input overlay at the given canvas
+     * coordinates, pre-filled with the shape's existing text (or empty for new text).
+     * Applies font/size/style from the shape or the active font settings, then focuses
+     * the element and places the caret at the end. Focus is deferred one tick to avoid
+     * browser focus-management quirks during mousedown.
+     * @param {number} x - Canvas X position for the overlay's top-left corner.
+     * @param {number} y - Canvas Y position for the overlay's top-left corner.
+     * @param {TextShape|null} shape - Existing shape to edit, or null for a new text shape.
+     */
     _showTextOverlay(x, y, shape) {
         const el = this.textInput;
         if (!el) return;
@@ -888,6 +1058,12 @@ export class ToolController {
         }, 0);
     }
 
+    /**
+     * Reads the text-input overlay content and applies it: updates the text on an
+     * existing shape (or deletes the shape if the text is cleared), or creates a new
+     * TextShape for fresh placements. Skips committing to history if the text is
+     * unchanged. Hides the overlay and resets editing state regardless.
+     */
     _commitText() {
         const el = this.textInput;
         if (!el || el.style.display === 'none') return;
@@ -921,6 +1097,10 @@ export class ToolController {
         this._update();
     }
 
+    /**
+     * Discards the current text-input overlay without saving any changes. Hides the
+     * overlay and resets all editing state. Triggered by pressing Escape.
+     */
     _cancelText() {
         const el = this.textInput;
         if (!el) return;

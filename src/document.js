@@ -7,6 +7,12 @@ const FORMAT_VERSION = 1;
 
 // ── Serialization ─────────────────────────────────────────────────────────────
 
+/**
+ * Converts a shape object into a plain JSON-serializable object.
+ * Each shape type includes only the properties it needs; unknown types throw.
+ * @param {object} shape - A shape instance (RectangleShape, LineShape, etc.).
+ * @returns {object} Plain data object suitable for JSON serialization.
+ */
 function serializeShape(shape) {
     const base = { type: shape.type, id: shape.id, locked: shape.locked ?? false };
     switch (shape.type) {
@@ -56,6 +62,12 @@ function serializeShape(shape) {
 
 // ── Deserialization ───────────────────────────────────────────────────────────
 
+/**
+ * Reconstructs a shape instance from a serialized plain data object.
+ * Applies defaults for any optional fields that may be absent in older documents.
+ * @param {object} data - Plain data object as produced by {@link serializeShape}.
+ * @returns {object} A fully initialized shape instance.
+ */
 function deserializeShape(data) {
     let shape;
     switch (data.type) {
@@ -111,6 +123,12 @@ function deserializeShape(data) {
     return shape;
 }
 
+/**
+ * Recursively collects all shape IDs, including those nested inside groups.
+ * Used to determine the highest existing ID so the UID generator can be seeded correctly.
+ * @param {object} shape - A shape instance, possibly of type 'group'.
+ * @returns {number[]} Flat array of all IDs reachable from this shape.
+ */
 function collectIds(shape) {
     if (shape.type === 'group') return [shape.id, ...shape.children.flatMap(collectIds)];
     return [shape.id];
@@ -118,6 +136,13 @@ function collectIds(shape) {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+/**
+ * Serializes the current drawing to a `.mcd` JSON file and triggers a browser download.
+ * @param {object[]} shapes - Array of shape instances to save.
+ * @param {number} canvasWidth - Logical canvas width in pixels.
+ * @param {number} canvasHeight - Logical canvas height in pixels.
+ * @param {string} [filename='drawing.mcd'] - Name for the downloaded file.
+ */
 export function saveDocument(shapes, canvasWidth, canvasHeight, filename = 'drawing.mcd') {
     const doc = {
         version: FORMAT_VERSION,
@@ -136,6 +161,13 @@ export function saveDocument(shapes, canvasWidth, canvasHeight, filename = 'draw
     URL.revokeObjectURL(url);
 }
 
+/**
+ * Parses a `.mcd` file buffer and returns the reconstructed drawing state.
+ * Validates the format version and re-seeds the UID generator to avoid ID collisions.
+ * @param {ArrayBuffer} buffer - Raw file contents as returned by the FileReader API.
+ * @returns {{ shapes: object[], canvasWidth: number, canvasHeight: number }} Restored drawing state.
+ * @throws {Error} If the buffer is not a valid MacDraw document or uses an unsupported version.
+ */
 export function loadDocument(buffer) {
     const text = new TextDecoder().decode(buffer);
     const data = JSON.parse(text);

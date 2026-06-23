@@ -24,13 +24,29 @@ const FILL_MODE_NAMES = {
 
 // ─── Coordinate helpers ───────────────────────────────────────────────────────
 
+/**
+ * Reads a 16.16 fixed-point number (big-endian) from a DataView.
+ * The high 16 bits are the signed integer part; the low 16 bits are the fractional part.
+ *
+ * @param {DataView} view - The DataView wrapping the file buffer.
+ * @param {number} offset - Byte offset into the DataView.
+ * @returns {number} The fixed-point value as a JavaScript float.
+ */
 function readFixed(view, offset) {
     return view.getInt16(offset, false) + view.getUint16(offset + 2, false) / 65536;
 }
 
 // ─── Freehand stroke helpers ──────────────────────────────────────────────────
 
-// Ramer-Douglas-Peucker polyline simplification.
+/**
+ * Simplifies a polyline using the Ramer-Douglas-Peucker algorithm.
+ * Removes points that deviate less than `eps` pixels from the straight line
+ * between their neighbours, reducing point count while preserving shape.
+ *
+ * @param {{x: number, y: number}[]} pts - Input polyline points.
+ * @param {number} eps - Maximum allowed perpendicular deviation in pixels.
+ * @returns {{x: number, y: number}[]} Simplified polyline (new array).
+ */
 function rdpSimplify(pts, eps) {
     if (pts.length < 3) return pts.slice();
     const p0 = pts[0], pn = pts[pts.length - 1];
@@ -49,7 +65,15 @@ function rdpSimplify(pts, eps) {
     return L.concat(R.slice(1));
 }
 
-// Convert a simplified polyline to bezier points using Catmull-Rom tangents.
+/**
+ * Converts a polyline to a cubic Bézier control-point sequence using
+ * Catmull-Rom tangents, so each segment flows smoothly through every knot.
+ * The first and last points use one-sided (endpoint) tangents.
+ *
+ * @param {{x: number, y: number}[]} pts - Simplified polyline points.
+ * @returns {{x: number, y: number, c1x: number, c1y: number, c2x: number, c2y: number}[]}
+ *   Array of knot objects, each carrying the anchor and its two cubic control points.
+ */
 function catmullRomBezier(pts) {
     const n = pts.length;
     const result = [];
@@ -70,7 +94,19 @@ function catmullRomBezier(pts) {
     return result;
 }
 
-// Freehand pencil stroke (shape type 0x08).
+/**
+ * Parses a MacDraw II freehand pencil stroke record (shape type 0x08).
+ * The record header encodes pen width and pattern; starting coordinates are
+ * stored as two 16.16 fixed-point values at o+28/o+32. Subsequent pairs of
+ * signed delta bytes (dH, dV) trace the path until a (0, 0) terminator.
+ * The raw point list is simplified with RDP and then converted to Bézier form.
+ *
+ * @param {DataView} view - The DataView wrapping the file buffer.
+ * @param {Uint8Array} bytes - Raw file bytes.
+ * @param {number} o - Byte offset of the stroke record within `bytes`.
+ * @param {number} scale - Points-to-pixels scale factor (96/72).
+ * @returns {BezierShape|null} The parsed stroke, or null if the record is malformed.
+ */
 function parseFreehandStroke(view, bytes, o, scale) {
     if (o + 36 > bytes.length) return null;
     const sy = view.getInt16(o + 28, false) + view.getUint16(o + 30, false) / 65536;
@@ -102,6 +138,15 @@ function parseFreehandStroke(view, bytes, o, scale) {
 
 // ─── Text extraction ──────────────────────────────────────────────────────────
 
+/**
+ * Reads a MacDraw II inline text string from raw bytes.
+ * Stops at a NUL (0x00) or SOH (0x01) terminator, or after 300 bytes.
+ * CR (0x0D) and LF (0x0A) are converted to newlines; non-ASCII bytes end the string.
+ *
+ * @param {Uint8Array} bytes - Raw file bytes.
+ * @param {number} start - Byte offset at which to begin reading.
+ * @returns {string} The decoded text string.
+ */
 function macDrawReadString(bytes, start) {
     let s = '';
     for (let i = start; i < bytes.length && i < start + 300; i++) {
@@ -114,6 +159,16 @@ function macDrawReadString(bytes, start) {
     return s;
 }
 
+/**
+ * Returns true if at least `minRun` consecutive bytes starting at `off` are
+ * all printable ASCII (0x20–0x7E) or line-ending characters (CR/LF).
+ * Used as a quick sanity check before attempting to read a text string.
+ *
+ * @param {Uint8Array} bytes - Raw file bytes.
+ * @param {number} off - Byte offset to test.
+ * @param {number} minRun - Minimum number of printable bytes required.
+ * @returns {boolean}
+ */
 function isPrintableAt(bytes, off, minRun) {
     for (let i = 0; i < minRun; i++) {
         if (off + i >= bytes.length) return false;
@@ -123,6 +178,18 @@ function isPrintableAt(bytes, off, minRun) {
     return true;
 }
 
+/**
+ * Scans the file for MacDraw II text records and returns them as TextShape objects.
+ * Runs two passes over the byte stream from offset 0x200 onward: the first pass
+ * collects non-wrapper text records (type 0x01/0x1A); the second collects wrapper
+ * records (type 0x02, flags 0x00). Duplicate strings (by trimmed 30-char prefix)
+ * are suppressed. Coordinates are scaled from points to pixels.
+ *
+ * @param {DataView} view - The DataView wrapping the file buffer.
+ * @param {Uint8Array} bytes - Raw file bytes.
+ * @param {number} scale - Points-to-pixels scale factor (96/72).
+ * @returns {TextShape[]} Array of positioned text shapes found in the file.
+ */
 function parseMacDrawText(view, bytes, scale) {
     const entries = [];
 
@@ -184,7 +251,16 @@ function parseMacDrawText(view, bytes, scale) {
 
 // ─── Record location ──────────────────────────────────────────────────────────
 
-// MacDraw II DRWG format: 512-byte header + 4-byte section marker at 0x200 → records from 0x204.
+/**
+ * Locates the start of the drawing-object stream within a MacDraw II file.
+ * If the file begins with the 'DRWG' magic signature, records are known to
+ * start at 0x204 (512-byte header + 4-byte section marker). Otherwise the
+ * function heuristically scans the first 2 KB for the first plausible record
+ * header (byte pattern: type ≥ 0x02, next byte 0x03, third byte < 0x20).
+ *
+ * @param {Uint8Array} bytes - Raw file bytes.
+ * @returns {number} Byte offset of the first record, or -1 if not found.
+ */
 function findMacDrawObjects(bytes) {
     const isDRWG = bytes.length >= 0x208 &&
         bytes[0] === 0x44 && bytes[1] === 0x52 && bytes[2] === 0x57 && bytes[3] === 0x47;
@@ -202,6 +278,32 @@ function findMacDrawObjects(bytes) {
 
 // ─── Record parser ────────────────────────────────────────────────────────────
 
+/**
+ * Parses a single MacDraw II drawing record and returns the appropriate shape object.
+ *
+ * Each record starts with a 4-byte header at `o`:
+ *   byte 0 — pen size (raw; subtract 1 for stroke width in points)
+ *   byte 1 — stroke pattern index
+ *   byte 2 — fill/draw variant (the `type` parameter)
+ *   byte 3 — shape class (the `flags` parameter, encodes rect/roundrect corner radius)
+ * Followed by four 16.16 fixed-point values: top, left, height-endpoint, width-endpoint.
+ * The byte at o-4 (preceding the header) carries the shape type code.
+ *
+ * Shape dispatch uses a combination of the preceding shape-type byte, the `type`
+ * (fill mode), and `flags` (shape class) to produce Line, Rectangle, RoundRect,
+ * Ellipse, Arc, or Bezier shapes. Returns null for unrecognised or out-of-range records.
+ *
+ * @param {DataView} view - The DataView wrapping the file buffer.
+ * @param {Uint8Array} bytes - Raw file bytes.
+ * @param {number} o - Byte offset of the record within `bytes`.
+ * @param {number} type - Fill/draw mode byte (byte 2 of the header; e.g. 0x01 transparent, 0x02 white).
+ * @param {number} flags - Shape class byte (byte 3; 0x00 = standard, 0x01–0x06 = rect/roundrect variant).
+ * @param {number} scale - Points-to-pixels scale factor (96/72).
+ * @param {number} [pageOffPtX=0] - Horizontal page origin offset in points.
+ * @param {number} [pageOffPtY=0] - Vertical page origin offset in points.
+ * @param {number} [recLen=24] - Total byte length of this record (used to detect extended arc records).
+ * @returns {RectangleShape|RoundRectShape|EllipseShape|LineShape|ArcShape|BezierShape|null}
+ */
 function parseMacDrawRecord(view, bytes, o, type, flags, scale, pageOffPtX = 0, pageOffPtY = 0, recLen = 24) {
     if (o + 20 > bytes.length) return null;
 
@@ -400,6 +502,26 @@ function parseMacDrawRecord(view, bytes, o, type, flags, scale, pageOffPtX = 0, 
 
 // ─── Main DRW parser ──────────────────────────────────────────────────────────
 
+/**
+ * Top-level parser for a MacDraw II .drw file. Converts the binary drawing data
+ * into an array of shape objects ready for rendering.
+ *
+ * Processing steps:
+ *  1. Locate the start of the drawing-object stream via findMacDrawObjects.
+ *  2. Heuristically scan for candidate record offsets (minimum 24-byte spacing).
+ *  3. Compute raw bounding boxes (16.16 fixed-point) for every candidate record.
+ *  4. Detect bbox-containment group relationships and build GroupShape trees.
+ *  5. Handle typed group containers (shape type 0x0a) as a separate inline pass.
+ *  6. Parse all remaining unclaimed records as individual shapes.
+ *  7. Append text shapes extracted by parseMacDrawText.
+ *
+ * Coordinates are converted from 72 dpi points to 96 dpi screen pixels (scale = 96/72).
+ *
+ * @param {ArrayBuffer} buffer - The raw file contents as an ArrayBuffer (needed for DataView).
+ * @param {Uint8Array} bytes - The same data as a Uint8Array for direct byte access.
+ * @returns {Array<RectangleShape|RoundRectShape|EllipseShape|LineShape|ArcShape|BezierShape|TextShape|GroupShape>}
+ *   Flat array of all parsed shapes; groups contain their children recursively.
+ */
 export function parseMacDraw(buffer, bytes) {
     const view = new DataView(buffer);
     const shapes = [];
@@ -497,6 +619,14 @@ export function parseMacDraw(buffer, bytes) {
         for (const ci of children) claimed.add(ci);
     }
 
+    /**
+     * Recursively builds a GroupShape from a group container record.
+     * Children that are themselves group containers are built first (depth-first),
+     * then leaf records are parsed with parseMacDrawRecord. Empty groups are dropped.
+     *
+     * @param {number} gi - Index into `recs` identifying the group container record.
+     * @returns {GroupShape|null} The assembled group, or null if it produced no valid children.
+     */
     const buildGroup = (gi) => {
         const childShapes = [];
         for (const ci of groupChildMap.get(gi) || []) {

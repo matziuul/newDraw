@@ -2,7 +2,16 @@ const PX_SIZES = [[5,'5'],[10,'10'],[20,'20'],[50,'50'],[100,'100']];
 const MM_SIZES = [[1,'1'],[2,'2'],[5,'5'],[10,'10']];
 const IN_SIZES = [[0.125,'1/8"'],[0.25,'1/4"'],[0.5,'1/2"'],[1,'1"']];
 
+/**
+ * Manages the grid and ruler-unit toolbar controls, keeping the DOM widgets
+ * and application state in sync and triggering re-renders when values change.
+ */
 export class GridControls {
+    /**
+     * @param {import('./state.js').AppState} state - Shared application state.
+     * @param {object} renderer - Renderer with a `render()` method.
+     * @param {object} ruler - Ruler instance with a `rebuild()` method.
+     */
     constructor(state, renderer, ruler) {
         this.state = state;
         this.renderer = renderer;
@@ -19,6 +28,7 @@ export class GridControls {
         this._attachEvents();
     }
 
+    /** Wires up change listeners for all four grid-related toolbar controls. */
     _attachEvents() {
         document.getElementById('cbGrid').addEventListener('change', e => {
             this.state.showGrid = e.target.checked;
@@ -42,6 +52,10 @@ export class GridControls {
         });
     }
 
+    /**
+     * Repopulates the grid-size dropdown with values appropriate for the
+     * current ruler unit (px / mm / in) and restores the previously selected size.
+     */
     _syncGridSizeSelect() {
         const unit = this.state.rulerUnit;
         const sizes = unit === 'mm' ? MM_SIZES : unit === 'in' ? IN_SIZES : PX_SIZES;

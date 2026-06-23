@@ -26,6 +26,13 @@ export const STYLE_DEFS = [
     { id: 16, name: 'Shadow',     kbd: null  },
 ];
 
+/**
+ * Returns the CSS font-family string for a named MacDraw font.
+ * Falls back to a generic sans-serif stack when the name is not in the list.
+ *
+ * @param {string} name - MacDraw font name (e.g. 'Geneva', 'Times').
+ * @returns {string} A CSS font-family value ready for use in a style attribute.
+ */
 export function fontCss(name) {
     return FONTS.find(f => f.name === name)?.css ?? `"${name}", sans-serif`;
 }

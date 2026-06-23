@@ -3,6 +3,16 @@ import { QD_PATTERNS } from './patterns.js';
 
 // ─── PICT version probe (also used by import.js for canvas-size detection) ────
 
+/**
+ * Probes a byte array to determine whether a valid PICT header exists at the
+ * given offset. Checks for both PICT v1 (opcode 0x11 0x01) and PICT v2
+ * (opcode 0x00 0x11 0x02 0xFF) version markers.
+ *
+ * @param {Uint8Array} bytes - Raw file bytes.
+ * @param {number} headerSize - Byte offset at which the PICT data begins
+ *   (typically 0 or 512 for the Mac 512-byte resource fork header).
+ * @returns {boolean} True if a recognised PICT version marker is found.
+ */
 export function isPictVersionAt(bytes, headerSize) {
     const o = headerSize + 2 + 8; // skip picSize(2) + boundrect(8)
     if (bytes.length < o + 4) return false;
@@ -14,6 +24,14 @@ export function isPictVersionAt(bytes, headerSize) {
 
 // ─── Shared utilities ─────────────────────────────────────────────────────────
 
+/**
+ * Maps an 8-row QuickDraw pattern (one byte per row) to the nearest index in
+ * the application's QD_PATTERNS palette. Tries an exact match first; falls
+ * back to a density-based bucket (empty → sparse → medium → dense → solid).
+ *
+ * @param {number[]} rows - Eight bytes representing the 8×8 pattern bitmap.
+ * @returns {number} Index into QD_PATTERNS (1-based; 0 means no fill).
+ */
 function matchPattern(rows) {
     for (let i = 1; i < QD_PATTERNS.length; i++) {
         const p = QD_PATTERNS[i];
@@ -27,10 +45,26 @@ function matchPattern(rows) {
     return 5;
 }
 
+/**
+ * Counts the number of set bits (population count) in a 32-bit integer.
+ *
+ * @param {number} n - The integer to count bits in.
+ * @returns {number} Number of 1-bits in n.
+ */
 function popcount(n) {
     let c = 0; while (n) { c += n & 1; n >>>= 1; } return c;
 }
 
+/**
+ * Scales all coordinate values of the given shapes by a uniform factor.
+ * Handles line shapes (x1/y1/x2/y2), bezier shapes (point + control-point
+ * pairs), and box-like shapes (x/y/width/height, and optional cornerRadius).
+ * Recurses into any shape's children array.
+ *
+ * @param {object[]} shapes - Array of shape objects to scale in-place.
+ * @param {number} s - Scale factor to apply (e.g. 96/72 to convert 72 dpi to
+ *   96 dpi screen pixels).
+ */
 function scaleShapes(shapes, s) {
     for (const sh of shapes) {
         if ('x1' in sh) {
@@ -52,6 +86,16 @@ function scaleShapes(shapes, s) {
     }
 }
 
+/**
+ * Post-processes the shape list by merging runs of adjacent LineShapes that
+ * share the same endpoint, stroke width, and stroke pattern into a single
+ * BezierShape polyline. Runs of fewer than three points are left as
+ * individual lines. Non-line shapes pass through unchanged.
+ *
+ * @param {object[]} shapes - Flat array of parsed shapes.
+ * @returns {object[]} New array with eligible line runs collapsed into
+ *   BezierShapes.
+ */
 function mergeConsecutiveLines(shapes) {
     const result = [];
     let i = 0;
@@ -84,6 +128,16 @@ function mergeConsecutiveLines(shapes) {
 // ─── PICT parser ──────────────────────────────────────────────────────────────
 
 class PictParser {
+    /**
+     * Creates a new PictParser for a single PICT resource.
+     *
+     * @param {DataView} view - DataView wrapping the underlying ArrayBuffer,
+     *   used for typed integer reads.
+     * @param {Uint8Array} bytes - Raw byte array of the same buffer, used for
+     *   direct index access.
+     * @param {number} hdr - Byte offset at which actual PICT data begins
+     *   (0 or 512 depending on whether a Mac resource-fork header is present).
+     */
     constructor(view, bytes, hdr) {
         this.v = view; this.b = bytes; this.o = hdr;
         this.shapes = [];
@@ -96,21 +150,45 @@ class PictParser {
         this.isV2 = false;
     }
 
+    /** Reads an unsigned 8-bit integer and advances the cursor by 1. @returns {number} */
     u8()    { return this.b[this.o++]; }
+    /** Reads a signed 8-bit integer and advances the cursor by 1. @returns {number} */
     i8()    { const v = this.v.getInt8(this.o++); return v; }
+    /** Reads an unsigned 16-bit big-endian integer and advances the cursor by 2. @returns {number} */
     u16()   { const v = this.v.getUint16(this.o, false); this.o += 2; return v; }
+    /** Reads a signed 16-bit big-endian integer and advances the cursor by 2. @returns {number} */
     i16()   { const v = this.v.getInt16(this.o, false);  this.o += 2; return v; }
+    /** Advances the cursor by n bytes without reading. @param {number} n */
     skip(n) { this.o += n; }
+    /** Advances the cursor to the next even byte boundary (word-aligns for PICT v2). */
     align() { if (this.o & 1) this.o++; }
 
+    /**
+     * Reads a QuickDraw Rect structure (top, left, bottom, right — each a
+     * signed 16-bit integer, 8 bytes total) and advances the cursor.
+     *
+     * @returns {{ t: number, l: number, b: number, r: number }}
+     */
     readRect()  {
         const t=this.i16(), l=this.i16(), b=this.i16(), r=this.i16();
         return { t, l, b, r };
     }
+    /** Reads a QuickDraw Point (v then h, each a signed 16-bit integer, 4 bytes) and returns {x, y}. @returns {{ x: number, y: number }} */
     readPt()    { const y=this.i16(), x=this.i16(); return { x, y }; }
+    /** Reads an 8-byte QuickDraw Pattern (one byte per row of an 8×8 bitmap) and returns the row array. @returns {number[]} */
     readPat()   { const rows=[]; for(let i=0;i<8;i++) rows.push(this.u8()); return rows; }
 
     // Shape constructors
+
+    /**
+     * Creates a RectangleShape from a QuickDraw Rect, applying the current pen
+     * width and fill/stroke pattern state.
+     *
+     * @param {{ t: number, l: number, b: number, r: number }} r - Bounding rect.
+     * @param {boolean} strokeOnly - When true the fill index is forced to 0
+     *   (frame operations); when false the current fillPat is used.
+     * @returns {RectangleShape}
+     */
     rect(r, strokeOnly) {
         const s = new RectangleShape(r.l, r.t, r.r-r.l, r.b-r.t);
         s.fillIdx = strokeOnly ? 0 : this.fillPat;
@@ -118,6 +196,14 @@ class PictParser {
         s.strokePatternIdx = this.penPat;
         return s;
     }
+    /**
+     * Creates an EllipseShape from a QuickDraw Rect, applying the current pen
+     * width and fill/stroke pattern state.
+     *
+     * @param {{ t: number, l: number, b: number, r: number }} r - Bounding rect.
+     * @param {boolean} strokeOnly - When true the fill index is forced to 0.
+     * @returns {EllipseShape}
+     */
     oval(r, strokeOnly) {
         const s = new EllipseShape(r.l, r.t, r.r-r.l, r.b-r.t);
         s.fillIdx = strokeOnly ? 0 : this.fillPat;
@@ -125,6 +211,14 @@ class PictParser {
         s.strokePatternIdx = this.penPat;
         return s;
     }
+    /**
+     * Creates a RoundRectShape from a QuickDraw Rect. The corner radius is
+     * derived from the current ovalSize state (set by the OvSize opcode 0x0B).
+     *
+     * @param {{ t: number, l: number, b: number, r: number }} r - Bounding rect.
+     * @param {boolean} strokeOnly - When true the fill index is forced to 0.
+     * @returns {RoundRectShape}
+     */
     rrect(r, strokeOnly) {
         const s = new RoundRectShape(r.l, r.t, r.r-r.l, r.b-r.t);
         s.cornerRadius = Math.round(this.ovalSize / 2);
@@ -133,12 +227,34 @@ class PictParser {
         s.strokePatternIdx = this.penPat;
         return s;
     }
+    /**
+     * Creates a LineShape between two points, applying the current pen width
+     * and stroke pattern state.
+     *
+     * @param {{ x: number, y: number }} a - Start point.
+     * @param {{ x: number, y: number }} b - End point.
+     * @returns {LineShape}
+     */
     line(a, b) {
         const s = new LineShape(a.x, a.y, b.x, b.y);
         s.strokeWidth = this.penW;
         s.strokePatternIdx = this.penPat;
         return s;
     }
+    /**
+     * Creates an ArcShape from a QuickDraw Rect and angle parameters. The
+     * quadrant field is derived from the midpoint of the arc sweep so the
+     * renderer can pick the correct quarter-ellipse.
+     *
+     * @param {{ t: number, l: number, b: number, r: number }} r - Bounding rect.
+     * @param {number} startAngle - Start angle in degrees (QuickDraw convention:
+     *   0 = 12 o'clock, clockwise).
+     * @param {number} arcAngle - Sweep angle in degrees (positive = clockwise).
+     * @param {boolean} strokeOnly - When true forces fill index to 0 (frame arc).
+     * @param {boolean} usePen - When true uses penPat as fill (paint arc);
+     *   otherwise uses fillPat (fill arc).
+     * @returns {ArcShape}
+     */
     arc(r, startAngle, arcAngle, strokeOnly, usePen) {
         const s = new ArcShape(r.l, r.t, r.r - r.l, r.b - r.t);
         const mid = ((startAngle + arcAngle / 2) % 360 + 360) % 360;
@@ -150,6 +266,13 @@ class PictParser {
         return s;
     }
 
+    /**
+     * Entry point for parsing a PICT resource. Reads the picture header, detects
+     * PICT v1 or v2, dispatches to the appropriate opcode loop, and finally
+     * scales all produced shapes from 72 dpi to 96 dpi screen coordinates.
+     *
+     * @returns {object[]} Array of shape objects ready for rendering.
+     */
     parse() {
         this.skip(2 + 8); // picSize + boundrect
 
@@ -169,6 +292,11 @@ class PictParser {
         return this.shapes;
     }
 
+    /**
+     * Main opcode dispatch loop for PICT version 1. Reads one-byte opcodes
+     * until the end-of-picture marker (0xFF) or end of data is reached.
+     * Attaches a debugSource record to every shape produced by each opcode.
+     */
     runV1() {
         while (this.o < this.b.length) {
             const opOff = this.o;
@@ -181,6 +309,12 @@ class PictParser {
         }
     }
 
+    /**
+     * Main opcode dispatch loop for PICT version 2. Word-aligns before each
+     * opcode, reads two-byte opcodes until the end-of-picture marker (0x00FF),
+     * and delegates known opcodes (≤ 0xFF) to op() or skips reserved v2 opcodes.
+     * Attaches a debugSource record to every shape produced by each opcode.
+     */
     runV2() {
         while (this.o < this.b.length) {
             this.align();
@@ -195,6 +329,13 @@ class PictParser {
         }
     }
 
+    /**
+     * Handles a single QuickDraw opcode. Updates parser state (pen size,
+     * patterns, oval size, current point/rect) and emits shapes for drawing
+     * opcodes. Unrecognised or unsupported opcodes are silently ignored.
+     *
+     * @param {number} op - The opcode byte value (0x00 – 0xFF).
+     */
     op(op) {
         switch (op) {
         case 0x00: break; // NOP
@@ -352,6 +493,16 @@ class PictParser {
         }
     }
 
+    /**
+     * Reads a QuickDraw Polygon record (opcodes 0x70–0x74 and 0x78–0x7C) and,
+     * for frame/paint operations, converts the vertex list to a closed
+     * BezierShape polyline. The polygon size field encodes the total byte
+     * length of the record including the size word itself.
+     *
+     * @param {number} op - The opcode byte that triggered this read. Determines
+     *   whether the polygon should be drawn (frame/paint) or only consumed from
+     *   the stream (erase/invert/fill).
+     */
     readPoly(op) {
         const size = this.u16();
         this.readRect(); // bounding rect (8 bytes, consumed)
@@ -372,6 +523,14 @@ class PictParser {
         }
     }
 
+    /**
+     * Skips a BitsRect or BitsRgn bitmap record (opcodes 0x90 / 0x91). The
+     * record contains an uncompressed bitmap; we advance past it without
+     * rendering because pixel bitmaps are not supported.
+     *
+     * @param {boolean} withRegion - True for opcode 0x91 (BitsRgn), which
+     *   includes an additional clip-region payload after the transfer mode.
+     */
     skipBitsRect(withRegion) {
         const rRaw = this.u16(), rowBytes = rRaw & 0x7FFF, isPixmap = !!(rRaw & 0x8000);
         const bds = this.readRect(), height = Math.max(0, bds.b - bds.t);
@@ -381,6 +540,15 @@ class PictParser {
         this.skip(height * rowBytes);
     }
 
+    /**
+     * Skips a PackBitsRect or PackBitsRgn compressed bitmap record (opcodes
+     * 0x98 / 0x99). Row data is PackBits-compressed; each row is preceded by
+     * a 1- or 2-byte length field depending on rowBytes. We skip the bytes
+     * without decoding.
+     *
+     * @param {boolean} withRegion - True for opcode 0x99 (PackBitsRgn), which
+     *   includes an additional clip-region payload after the transfer mode.
+     */
     skipPackBitsRect(withRegion) {
         const rRaw = this.u16(), rowBytes = rRaw & 0x7FFF, isPixmap = !!(rRaw & 0x8000);
         const bds = this.readRect(), height = bds.b - bds.t;
@@ -393,6 +561,15 @@ class PictParser {
         }
     }
 
+    /**
+     * Skips a DirectBitsRect or DirectBitsRgn 32-bit direct-colour bitmap
+     * record (opcodes 0x9A / 0x9B). Always includes a PixMap and colour table.
+     * Row data is compressed; each row is preceded by a 1- or 2-byte length
+     * field depending on rowBytes.
+     *
+     * @param {boolean} withRegion - True for opcode 0x9B (DirectBitsRgn),
+     *   which includes an additional clip-region payload after the transfer mode.
+     */
     skipDirectBitsRect(withRegion) {
         this.skip(4); // baseAddr placeholder
         const rRaw = this.u16(), rowBytes = rRaw & 0x7FFF;
@@ -406,18 +583,42 @@ class PictParser {
         }
     }
 
+    /**
+     * Skips a QuickDraw ColorTable structure. The table consists of a 4-byte
+     * seed, a 2-byte flags field, a 2-byte count-minus-one, and then
+     * (count) entries of 8 bytes each (a 2-byte value index plus a 6-byte
+     * RGBColor).
+     */
     skipColorTable() {
         this.skip(4 + 2); // ctSeed + ctFlags
         const ctSize = this.u16(); // count - 1
         this.skip((ctSize + 1) * 8); // value(2) + RGBColor(6) each
     }
 
+    /**
+     * Skips an unrecognised PICT v2 reserved opcode. For opcodes in the range
+     * 0x0100–0x7FFF the data length is encoded in the opcode value itself
+     * (bits 7–21 give the word count); opcodes below 0x0100 have no data.
+     *
+     * @param {number} op - The 16-bit opcode that was not handled by op().
+     */
     skipReservedV2(op) {
         const dataLen = (op >= 0x0100) ? ((op >>> 7) & 0xFFFE) : 0;
         this.skip(dataLen);
     }
 }
 
+/**
+ * Parses a PICT resource and returns a flat array of drawable shapes.
+ * Auto-detects whether the file has a 512-byte Mac resource-fork header,
+ * runs the appropriate PICT v1 or v2 opcode loop, and merges consecutive
+ * collinear lines into polylines for cleaner rendering.
+ *
+ * @param {ArrayBuffer} buffer - The raw PICT file data as an ArrayBuffer.
+ * @param {Uint8Array} bytes - A Uint8Array view of the same buffer.
+ * @returns {object[]} Array of shape objects (RectangleShape, EllipseShape,
+ *   LineShape, BezierShape, RoundRectShape, ArcShape, etc.) scaled to 96 dpi.
+ */
 export function parsePict(buffer, bytes) {
     const headerSize = isPictVersionAt(bytes, 512) ? 512 : 0;
     const shapes = new PictParser(new DataView(buffer), bytes, headerSize).parse();

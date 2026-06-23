@@ -1,7 +1,12 @@
 export const PX_PER_MM = 96 / 25.4;
 export const PX_PER_IN = 96;
 
+/**
+ * Central application state container. A single instance is created at startup
+ * and passed to every subsystem that needs to read or write shared state.
+ */
 export class AppState {
+    /** Initialises all state fields to their defaults. */
     constructor() {
         this.activeTool = 'select';
         this.shapes = [];
@@ -50,10 +55,16 @@ export class AppState {
         this.zoom = 1.0;     // current zoom level (1 = 100%)
     }
 
+    /** Returns the currently selected shape object, or null when nothing is selected. */
     get selectedShape() {
         return this.shapes.find(s => s.id === this.selectedId) ?? null;
     }
 
+    /**
+     * Returns the current grid spacing in canvas pixels, derived from the
+     * active ruler unit and its corresponding size setting.
+     * @returns {number} Grid step size in pixels.
+     */
     get gridStep() {
         if (this.rulerUnit === 'mm') return this.gridSizeMm * PX_PER_MM;
         if (this.rulerUnit === 'in') return this.gridSizeIn * PX_PER_IN;

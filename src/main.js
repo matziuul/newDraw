@@ -56,6 +56,13 @@ const docDiv    = document.querySelector('.document');
 const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
 let baseW = 794, baseH = 1123;  // A4 portrait at 96 dpi
 
+/**
+ * Applies a zoom level to the canvas and all associated UI elements.
+ * Scales the canvas resolution, ruler dimensions, and wrapper CSS sizes so that
+ * the logical document occupies exactly baseW × baseH logical pixels at zoom 1.
+ *
+ * @param {number} z - Zoom factor (e.g. 0.5, 1.0, 2.0).
+ */
 function applyZoom(z) {
     state.zoom = z;
     const w = Math.round(baseW * z);
@@ -85,12 +92,26 @@ document.getElementById('zoomOut').addEventListener('click', () => {
     if (i > 0) applyZoom(ZOOM_LEVELS[i - 1]);
 });
 
+/**
+ * Changes the logical document size and re-applies the current zoom level,
+ * which resizes the canvas and all ruler/wrapper elements to match.
+ *
+ * @param {number} w - New document width in logical pixels (at zoom 1).
+ * @param {number} h - New document height in logical pixels (at zoom 1).
+ */
 function resizeCanvas(w, h) {
     baseW = w;
     baseH = h;
     applyZoom(state.zoom);
 }
 
+/**
+ * Wires up the canvas-size dialog: preset selector, manual width/height inputs,
+ * live mm readout, cancel, and apply buttons.
+ *
+ * @returns {() => void} A function that, when called, populates the dialog with
+ *   the current canvas dimensions and opens it as a modal.
+ */
 function setupCanvasSizeDialog() {
     const dlg       = document.getElementById('canvasSizeDialog');
     const selPreset = document.getElementById('dlgPreset');

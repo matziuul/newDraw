@@ -1,4 +1,9 @@
 export class DebugPanel {
+    /**
+     * Creates the debug panel and wires up its close button.
+     * @param {object} state - Shared application state (provides selectedId).
+     * @param {object} renderer - The canvas renderer (used to redraw after selection change).
+     */
     constructor(state, renderer) {
         this.state    = state;
         this.renderer = renderer;
@@ -9,12 +14,26 @@ export class DebugPanel {
         document.getElementById('dbgClose').addEventListener('click', () => this.hide());
     }
 
+    /**
+     * Returns true if the panel is currently visible on screen.
+     * @returns {boolean}
+     */
     get visible() { return this.el.style.display !== 'none' && this.el.style.display !== ''; }
 
+    /** Makes the panel visible and syncs the selection highlight. */
     show() { this.el.style.display = 'flex'; this.syncSelection(); }
+
+    /** Hides the panel. */
     hide() { this.el.style.display = 'none'; }
+
+    /** Toggles the panel between visible and hidden. */
     toggle() { if (this.visible) this.hide(); else this.show(); }
 
+    /**
+     * Clears the list and rebuilds it from the given shape tree.
+     * Call this whenever the shape list changes (load, delete, undo, etc.).
+     * @param {object[]} shapes - Top-level shapes (may include groups with children).
+     */
     populate(shapes) {
         this.listEl.innerHTML = '';
         this._rows.clear();
@@ -23,6 +42,13 @@ export class DebugPanel {
         this.syncSelection();
     }
 
+    /**
+     * Recursively walks the shape tree and appends one row per shape.
+     * Groups are indented one level deeper than their parent.
+     * @param {object[]} shapes - Shapes to render at this level.
+     * @param {number} depth - Current nesting depth (0 = top-level).
+     * @param {{ n: number }} counter - Shared sequential index that increments across all levels.
+     */
     _buildRows(shapes, depth, counter) {
         for (const shape of shapes) {
             const idx = counter.n++;
@@ -33,6 +59,15 @@ export class DebugPanel {
         }
     }
 
+    /**
+     * Builds the DOM element for a single shape row.
+     * The row shows: sequential index, source format (PICT opcode or DRW file offset),
+     * indented type name, and a geometry summary. Clicking the row selects the shape.
+     * @param {number} idx - Sequential row number across the whole list.
+     * @param {object} shape - The shape to display.
+     * @param {number} depth - Nesting depth used for indentation.
+     * @returns {HTMLElement}
+     */
     _makeRow(idx, shape, depth) {
         const row = document.createElement('div');
         row.className = 'dbg-row';
@@ -62,6 +97,13 @@ export class DebugPanel {
         return row;
     }
 
+    /**
+     * Returns a short human-readable geometry string for a shape,
+     * e.g. "120,80  200×150" for a rectangle or "(0,0)→(100,50)" for a line.
+     * Returns an empty string for unknown types.
+     * @param {object} shape
+     * @returns {string}
+     */
     _geom(shape) {
         switch (shape.type) {
             case 'rectangle': case 'roundrect': case 'ellipse': case 'arc':
@@ -79,6 +121,10 @@ export class DebugPanel {
         }
     }
 
+    /**
+     * Highlights the row for the currently selected shape and scrolls it into view.
+     * Safe to call at any time; does nothing when the panel is hidden.
+     */
     syncSelection() {
         if (!this.visible) return;
         const selId = this.state.selectedId;

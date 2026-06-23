@@ -3,7 +3,13 @@ import { STROKE_DASHES, ARROW_MODES, RectangleShape, RoundRectShape } from './sh
 
 const STROKE_WIDTHS = [1, 2, 3, 4, 6, 8];
 
+/** Builds and manages the drawing toolbar: tool buttons, style swatches, and keyboard shortcuts. */
 export class Toolbar {
+    /**
+     * @param {object} state - Shared application state (active tool, style indices, shapes, etc.).
+     * @param {object} renderer - Renderer instance; its `render()` method is called after style changes.
+     * @param {object} history - History instance used to record style mutations as undoable operations.
+     */
     constructor(state, renderer, history) {
         this.state = state;
         this.renderer = renderer;
@@ -19,6 +25,10 @@ export class Toolbar {
         this._attachEvents();
     }
 
+    /**
+     * Populates the fill-pattern grid with one canvas swatch per QD_PATTERN entry.
+     * Clicking a swatch updates the active fill pattern and applies it to the selected shape.
+     */
     _buildSwatches() {
         const grid = document.getElementById('patternGrid');
         QD_PATTERNS.forEach((p, idx) => {
@@ -56,6 +66,11 @@ export class Toolbar {
         });
     }
 
+    /**
+     * Populates the corner-radius grid with six swatches ranging from sharp to rounded corners.
+     * Clicking a swatch converts the selected rectangle/roundrect to match the chosen radius class,
+     * replacing the shape object in-place while preserving all other style properties.
+     */
     _buildCornerSwatches() {
         // class 1=square, 2–6 = corner radius n/16 inch; preview radii chosen for visual clarity
         const CORNER_CLASSES = [1, 2, 3, 4, 5, 6];
@@ -112,6 +127,10 @@ export class Toolbar {
         });
     }
 
+    /**
+     * Populates the stroke-width grid with one swatch per entry in STROKE_WIDTHS.
+     * Clicking a swatch updates the active stroke width and applies it to the selected shape.
+     */
     _buildStrokeSwatches() {
         const grid = document.getElementById('strokeGrid');
         STROKE_WIDTHS.forEach(w => {
@@ -144,6 +163,11 @@ export class Toolbar {
         });
     }
 
+    /**
+     * Populates the stroke-pattern grid with one swatch per QD_PATTERN entry.
+     * Clicking a swatch updates the active stroke pattern and applies it to the selected shape
+     * (skipping text and group shapes, which do not support stroke patterns).
+     */
     _buildStrokePatternSwatches() {
         const grid = document.getElementById('strokePatternGrid');
         QD_PATTERNS.forEach((p, idx) => {
@@ -181,6 +205,11 @@ export class Toolbar {
         });
     }
 
+    /**
+     * Populates the dash-style grid with one swatch per entry in STROKE_DASHES.
+     * Clicking a swatch updates the active dash index and applies it to the selected shape
+     * (skipping text and group shapes).
+     */
     _buildDashSwatches() {
         const grid = document.getElementById('dashGrid');
         STROKE_DASHES.forEach((d, idx) => {
@@ -214,6 +243,10 @@ export class Toolbar {
         });
     }
 
+    /**
+     * Populates the arrowhead grid with one swatch per entry in ARROW_MODES.
+     * Clicking a swatch updates the active arrow mode and applies it to the selected line or bezier shape.
+     */
     _buildArrowSwatches() {
         const grid = document.getElementById('arrowGrid');
         ARROW_MODES.forEach((mode, idx) => {
@@ -254,6 +287,10 @@ export class Toolbar {
         });
     }
 
+    /**
+     * Updates the `active` CSS class on every swatch grid to reflect the current state values.
+     * Should be called after any state change that affects the toolbar's visual selection.
+     */
     sync() {
         document.querySelectorAll('.pattern-swatch').forEach((s, i) =>
             s.classList.toggle('active', i === this.state.activePatternIdx));
@@ -270,6 +307,11 @@ export class Toolbar {
             s.classList.toggle('active', CORNER_CLASSES[i] === this.state.activeCornerClass));
     }
 
+    /**
+     * Wires up click/dblclick listeners on tool buttons and a document-level keydown listener
+     * for single-key tool shortcuts (s, r, o, e, l, b, t, a).
+     * Double-clicking a button activates "sticky" mode so the tool stays selected after use.
+     */
     _attachEvents() {
         this.buttons.forEach(btn => {
             btn.addEventListener('click',    () => this._select(btn.dataset.tool, false));
@@ -284,6 +326,11 @@ export class Toolbar {
         });
     }
 
+    /**
+     * Activates the named tool, updates button states, and refreshes the status bar label.
+     * @param {string} name - Tool identifier (e.g. 'select', 'rectangle', 'line').
+     * @param {boolean} [sticky=false] - When true the tool remains active after a shape is drawn.
+     */
     _select(name, sticky = false) {
         this.state.activeTool = name;
         this.state.toolSticky = sticky;
@@ -297,6 +344,7 @@ export class Toolbar {
         this.renderer.render();
     }
 
+    /** Switches back to the selection tool without sticky mode; used after completing a draw operation. */
     resetToSelect() {
         this._select('select', false);
     }

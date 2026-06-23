@@ -7,6 +7,16 @@ export const ARROW_MODES = [
     { name: 'Båda',  start: true,  end: true  },
 ];
 
+/**
+ * Draws a filled triangular arrowhead at the given tip point, oriented along `angle`.
+ * The arrowhead size scales with stroke width so thin and thick lines look proportional.
+ *
+ * @param {CanvasRenderingContext2D} ctx - The canvas rendering context.
+ * @param {number} tipX - X coordinate of the arrow tip.
+ * @param {number} tipY - Y coordinate of the arrow tip.
+ * @param {number} angle - Direction the arrow points, in radians.
+ * @param {number} sw - Stroke width of the parent line, used to scale the head.
+ */
 function _arrowHead(ctx, tipX, tipY, angle, sw) {
     const L = Math.max(10, sw * 3);
     const W = Math.max(4,  sw * 1.5);
@@ -41,15 +51,48 @@ export const HANDLE_DEFS = [
 export const HS = 6;
 
 let _uid = 0;
+/** Returns the next unique shape ID and advances the internal counter. @returns {number} */
 export function nextUid() { return ++_uid; }
+
+/**
+ * Advances the internal UID counter to at least `n`, ensuring IDs loaded from
+ * a saved document don't collide with newly created shapes.
+ *
+ * @param {number} n - The minimum value the counter should reach.
+ */
 export function seedUid(n) { if (n > _uid) _uid = n; }
 
+/**
+ * Normalizes a rectangle so that width and height are always positive, adjusting
+ * the origin as needed. Handles shapes drawn in any drag direction.
+ *
+ * @param {number} x - Left edge (may be the right edge if width is negative).
+ * @param {number} y - Top edge (may be the bottom edge if height is negative).
+ * @param {number} w - Width (may be negative).
+ * @param {number} h - Height (may be negative).
+ * @returns {{ x: number, y: number, width: number, height: number }}
+ */
 export function normalize(x, y, w, h) {
     return { x: w < 0 ? x + w : x, y: h < 0 ? y + h : y, width: Math.abs(w), height: Math.abs(h) };
 }
 
+/**
+ * Snaps a coordinate to the nearest integer pixel, used for QuickDraw-style
+ * pixel-aligned rendering.
+ *
+ * @param {number} v - The value to snap.
+ * @returns {number}
+ */
 export function snap(v) { return Math.round(v); }
 
+/**
+ * Moves a shape by a delta, modifying its coordinates in place. Handles all
+ * shape types including lines, bezier curves, and groups (recursively).
+ *
+ * @param {object} shape - The shape to move.
+ * @param {number} dx - Horizontal offset in canvas units.
+ * @param {number} dy - Vertical offset in canvas units.
+ */
 export function offsetShape(shape, dx, dy) {
     if (shape.type === 'line') {
         shape.x1 += dx; shape.y1 += dy;
@@ -67,7 +110,16 @@ export function offsetShape(shape, dx, dy) {
     }
 }
 
-// Reset shape to origin clone coords + delta (used for live-drag from saved origin)
+/**
+ * Repositions a shape relative to a saved origin snapshot plus a drag delta.
+ * Used during live dragging so the position stays anchored to where the drag
+ * started, avoiding accumulated floating-point error from repeated incremental moves.
+ *
+ * @param {object} shape - The shape being dragged (mutated in place).
+ * @param {object} origin - A clone of the shape captured at drag start.
+ * @param {number} dx - Total horizontal displacement from the drag origin.
+ * @param {number} dy - Total vertical displacement from the drag origin.
+ */
 export function applyMoveFromOrigin(shape, origin, dx, dy) {
     if (shape.type === 'line') {
         shape.x1 = origin.x1 + dx; shape.y1 = origin.y1 + dy;
@@ -87,6 +139,13 @@ export function applyMoveFromOrigin(shape, origin, dx, dy) {
     }
 }
 
+/**
+ * Returns the eight resize-handle positions (corners + edge midpoints) for a
+ * given bounding box, each tagged with a compass-point ID.
+ *
+ * @param {{ x: number, y: number, width: number, height: number }} b - The bounding box.
+ * @returns {Array<{ id: string, x: number, y: number }>}
+ */
 export function getHandlePoints(b) {
     const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
     return [
@@ -101,6 +160,17 @@ export function getHandlePoints(b) {
     ];
 }
 
+/**
+ * Returns the ID of the resize handle under the given canvas point, or null if
+ * no handle was hit. Handle hit area is scaled inversely with zoom so handles
+ * stay finger-friendly at any zoom level.
+ *
+ * @param {number} px - X coordinate of the pointer in canvas space.
+ * @param {number} py - Y coordinate of the pointer in canvas space.
+ * @param {{ x: number, y: number, width: number, height: number }} bounds - Selection bounding box.
+ * @param {number} [zoom=1] - Current canvas zoom factor.
+ * @returns {string|null} Compass-point handle ID, e.g. `'nw'`, or null.
+ */
 export function hitTestHandle(px, py, bounds, zoom = 1) {
     const hs = HS / zoom;
     for (const h of getHandlePoints(bounds)) {
@@ -109,7 +179,16 @@ export function hitTestHandle(px, py, bounds, zoom = 1) {
     return null;
 }
 
-// Returns 0 (start handle), 1 (end handle), or null.
+/**
+ * Hit-tests the two reshape handles at the start and end of an arc.
+ * Returns 0 for the start handle, 1 for the end handle, or null if neither was hit.
+ *
+ * @param {number} px - Pointer X in canvas space.
+ * @param {number} py - Pointer Y in canvas space.
+ * @param {ArcShape} shape - The arc shape whose handles are tested.
+ * @param {number} [zoom=1] - Current canvas zoom factor.
+ * @returns {0|1|null}
+ */
 export function hitTestArcHandle(px, py, shape, zoom = 1) {
     const r = (HS + 2) / zoom;
     const pts = shape.getArcHandlePositions();
@@ -119,6 +198,16 @@ export function hitTestArcHandle(px, py, shape, zoom = 1) {
     return null;
 }
 
+/**
+ * Hit-tests all anchor points and control handles of a bezier shape.
+ * Returns a descriptor for the first hit, or null if nothing was hit.
+ *
+ * @param {number} px - Pointer X in canvas space.
+ * @param {number} py - Pointer Y in canvas space.
+ * @param {BezierShape} shape - The bezier shape to test.
+ * @param {number} [zoom=1] - Current canvas zoom factor.
+ * @returns {{ pointIdx: number, role: 'anchor'|'c1'|'c2' }|null}
+ */
 export function hitTestBezierHandle(px, py, shape, zoom = 1) {
     const hs = HS / zoom;
     const cr = 6 / zoom;
@@ -135,25 +224,53 @@ export function hitTestBezierHandle(px, py, shape, zoom = 1) {
 }
 
 export class RectangleShape {
+    /**
+     * Creates a rectangle shape with default styling (no fill, black stroke, 2px).
+     *
+     * @param {number} x - Left edge.
+     * @param {number} y - Top edge.
+     * @param {number} w - Width (may be negative if drawn right-to-left).
+     * @param {number} h - Height (may be negative if drawn bottom-to-top).
+     */
     constructor(x, y, w, h) {
         this.id = nextUid(); this.type = 'rectangle';
         this.x = x; this.y = y; this.width = w; this.height = h;
         this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
     }
 
+    /** Returns the normalized (positive-size) axis-aligned bounding box. @returns {{ x: number, y: number, width: number, height: number }} */
     getBounds() { return normalize(this.x, this.y, this.width, this.height); }
 
+    /**
+     * Returns true if the point (px, py) falls inside the rectangle.
+     *
+     * @param {number} px - X coordinate in canvas space.
+     * @param {number} py - Y coordinate in canvas space.
+     * @returns {boolean}
+     */
     hitTest(px, py) {
         const { x, y, width, height } = this.getBounds();
         return px >= x && px <= x + width && py >= y && py <= y + height;
     }
 
+    /**
+     * Returns a deep copy of this shape, preserving all style properties and the same ID.
+     *
+     * @returns {RectangleShape}
+     */
     clone() {
         const s = new RectangleShape(this.x, this.y, this.width, this.height);
         s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
         return s;
     }
 
+    /**
+     * Renders the rectangle onto the canvas using the supplied pattern palette.
+     *
+     * @param {CanvasRenderingContext2D} ctx - Rendering context.
+     * @param {Array<CanvasPattern|string|null>} patterns - Indexed fill/stroke patterns.
+     * @param {boolean} qd - When true, snap coordinates to integer pixels (QuickDraw mode).
+     */
     draw(ctx, patterns, qd) {
         const { x, y, width, height } = this.getBounds();
         const px = qd ? snap(x) + 0.5 : x, py = qd ? snap(y) + 0.5 : y;
@@ -170,14 +287,31 @@ export class RectangleShape {
 }
 
 export class EllipseShape {
+    /**
+     * Creates an ellipse shape inscribed in the given bounding box, with default styling.
+     *
+     * @param {number} x - Left edge of the bounding box.
+     * @param {number} y - Top edge of the bounding box.
+     * @param {number} w - Width (may be negative).
+     * @param {number} h - Height (may be negative).
+     */
     constructor(x, y, w, h) {
         this.id = nextUid(); this.type = 'ellipse';
         this.x = x; this.y = y; this.width = w; this.height = h;
         this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
     }
 
+    /** Returns the normalized axis-aligned bounding box. @returns {{ x: number, y: number, width: number, height: number }} */
     getBounds() { return normalize(this.x, this.y, this.width, this.height); }
 
+    /**
+     * Returns true if the point (px, py) lies inside the ellipse, using the
+     * normalized ellipse equation so any aspect ratio is handled correctly.
+     *
+     * @param {number} px - X coordinate in canvas space.
+     * @param {number} py - Y coordinate in canvas space.
+     * @returns {boolean}
+     */
     hitTest(px, py) {
         const { x, y, width, height } = this.getBounds();
         if (width === 0 || height === 0) return false;
@@ -186,12 +320,24 @@ export class EllipseShape {
         return dx * dx + dy * dy <= 1;
     }
 
+    /**
+     * Returns a deep copy of this shape, preserving all style properties and the same ID.
+     *
+     * @returns {EllipseShape}
+     */
     clone() {
         const s = new EllipseShape(this.x, this.y, this.width, this.height);
         s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
         return s;
     }
 
+    /**
+     * Renders the ellipse onto the canvas using the supplied pattern palette.
+     *
+     * @param {CanvasRenderingContext2D} ctx - Rendering context.
+     * @param {Array<CanvasPattern|string|null>} patterns - Indexed fill/stroke patterns.
+     * @param {boolean} qd - When true, snap coordinates to integer pixels (QuickDraw mode).
+     */
     draw(ctx, patterns, qd) {
         const { x, y, width, height } = this.getBounds();
         const px = qd ? snap(x) : x, py = qd ? snap(y) : y;
@@ -210,12 +356,26 @@ export class EllipseShape {
 }
 
 export class LineShape {
+    /**
+     * Creates a straight line segment between two endpoints, with default styling
+     * and no arrowheads.
+     *
+     * @param {number} x1 - Start X.
+     * @param {number} y1 - Start Y.
+     * @param {number} x2 - End X.
+     * @param {number} y2 - End Y.
+     */
     constructor(x1, y1, x2, y2) {
         this.id = nextUid(); this.type = 'line';
         this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2;
         this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.arrowMode = 0; this.locked = false;
     }
 
+    /**
+     * Returns the axis-aligned bounding box that tightly wraps the line segment.
+     *
+     * @returns {{ x: number, y: number, width: number, height: number }}
+     */
     getBounds() {
         return {
             x: Math.min(this.x1, this.x2), y: Math.min(this.y1, this.y2),
@@ -223,6 +383,13 @@ export class LineShape {
         };
     }
 
+    /**
+     * Returns true if the pointer is within ~6px of the nearest point on the line segment.
+     *
+     * @param {number} px - Pointer X in canvas space.
+     * @param {number} py - Pointer Y in canvas space.
+     * @returns {boolean}
+     */
     hitTest(px, py) {
         const dx = this.x2 - this.x1, dy = this.y2 - this.y1;
         const len2 = dx * dx + dy * dy;
@@ -231,12 +398,25 @@ export class LineShape {
         return Math.hypot(px - (this.x1 + t * dx), py - (this.y1 + t * dy)) < 6;
     }
 
+    /**
+     * Returns a deep copy of this shape, preserving all style properties and the same ID.
+     *
+     * @returns {LineShape}
+     */
     clone() {
         const s = new LineShape(this.x1, this.y1, this.x2, this.y2);
         s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.arrowMode = this.arrowMode; s.locked = this.locked;
         return s;
     }
 
+    /**
+     * Renders the line (and any arrowheads) onto the canvas. The line is shortened
+     * where arrowheads are placed so the stroke does not overdraw the filled heads.
+     *
+     * @param {CanvasRenderingContext2D} ctx - Rendering context.
+     * @param {Array<CanvasPattern|string|null>} patterns - Indexed fill/stroke patterns.
+     * @param {boolean} qd - When true, snap coordinates to integer pixels (QuickDraw mode).
+     */
     draw(ctx, patterns, qd) {
         const x1 = qd ? snap(this.x1) + 0.5 : this.x1;
         const y1 = qd ? snap(this.y1) + 0.5 : this.y1;
@@ -272,6 +452,13 @@ export class LineShape {
 }
 
 let _scratchCtx = null;
+/**
+ * Returns a lazily-created 1×1 off-screen canvas context used for geometric
+ * hit-testing (isPointInPath / isPointInStroke) without allocating a new canvas
+ * on every test.
+ *
+ * @returns {CanvasRenderingContext2D}
+ */
 function getScratchCtx() {
     if (!_scratchCtx) {
         const c = document.createElement('canvas');
@@ -285,12 +472,23 @@ function getScratchCtx() {
 // c1 = in-handle (from previous segment), c2 = out-handle (to next segment)
 // Corner points have c1 = c2 = { x, y }
 export class BezierShape {
+    /**
+     * Creates a cubic bezier path shape from an ordered array of control points.
+     * Each point carries its anchor coordinates plus in/out control handles.
+     *
+     * @param {Array<{ x: number, y: number, c1x: number, c1y: number, c2x: number, c2y: number }>} [points=[]]
+     */
     constructor(points = []) {
         this.id = nextUid(); this.type = 'bezier';
         this.points = points;
         this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.arrowMode = 0; this.locked = false;
     }
 
+    /**
+     * Builds a Path2D representing the full bezier curve through all control points.
+     *
+     * @returns {Path2D}
+     */
     _makePath() {
         const pts = this.points, path = new Path2D();
         if (pts.length < 1) return path;
@@ -301,6 +499,13 @@ export class BezierShape {
         return path;
     }
 
+    /**
+     * Returns an approximate bounding box computed from all anchor and control-handle
+     * coordinates. This may be slightly larger than the true curve envelope but is
+     * fast and sufficient for selection and layout.
+     *
+     * @returns {{ x: number, y: number, width: number, height: number }}
+     */
     getBounds() {
         if (this.points.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
         const xs = this.points.flatMap(p => [p.x, p.c1x, p.c2x]);
@@ -310,6 +515,14 @@ export class BezierShape {
         return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
     }
 
+    /**
+     * Returns true if the pointer is within the stroke area of the bezier curve.
+     * Uses the browser's isPointInStroke with a minimum hit-width of 8px for usability.
+     *
+     * @param {number} px - Pointer X in canvas space.
+     * @param {number} py - Pointer Y in canvas space.
+     * @returns {boolean}
+     */
     hitTest(px, py) {
         if (this.points.length < 2) return false;
         const ctx = getScratchCtx();
@@ -317,12 +530,23 @@ export class BezierShape {
         return ctx.isPointInStroke(this._makePath(), px, py);
     }
 
+    /**
+     * Returns a deep copy of this shape with all points and style properties duplicated.
+     *
+     * @returns {BezierShape}
+     */
     clone() {
         const b = new BezierShape(this.points.map(p => ({ ...p })));
         b.id = this.id; b.fillIdx = this.fillIdx; b.strokeWidth = this.strokeWidth; b.strokeDash = this.strokeDash; b.strokePatternIdx = this.strokePatternIdx; b.arrowMode = this.arrowMode; b.locked = this.locked;
         return b;
     }
 
+    /**
+     * Returns the outgoing angle at the last point of the curve, used to orient
+     * the end arrowhead along the curve's tangent.
+     *
+     * @returns {number} Angle in radians.
+     */
     _endAngle() {
         const pts = this.points, n = pts.length - 1;
         const p = pts[n];
@@ -330,12 +554,27 @@ export class BezierShape {
         return Math.atan2(p.y - pts[n - 1].y, p.x - pts[n - 1].x);
     }
 
+    /**
+     * Returns the incoming angle at the first point of the curve, used to orient
+     * the start arrowhead along the curve's tangent.
+     *
+     * @returns {number} Angle in radians.
+     */
     _startAngle() {
         const pts = this.points, p = pts[0];
         if (p.c2x !== p.x || p.c2y !== p.y) return Math.atan2(p.y - p.c2y, p.x - p.c2x);
         return Math.atan2(p.y - pts[1].y, p.x - pts[1].x);
     }
 
+    /**
+     * Renders the bezier curve (and any arrowheads) onto the canvas.
+     * Applies a √2 stroke-width correction for 1px pens to compensate for
+     * canvas anti-aliasing making diagonal strokes appear thinner.
+     *
+     * @param {CanvasRenderingContext2D} ctx - Rendering context.
+     * @param {Array<CanvasPattern|string|null>} patterns - Indexed fill/stroke patterns.
+     * @param {boolean} _qd - Unused; bezier coordinates are not snapped.
+     */
     draw(ctx, patterns, _qd) {
         if (this.points.length < 2) return;
         const strokePat = patterns[this.strokePatternIdx ?? 3];
@@ -363,6 +602,14 @@ export class BezierShape {
 }
 
 export class RoundRectShape {
+    /**
+     * Creates a rounded-rectangle shape with a default corner radius of 10px.
+     *
+     * @param {number} x - Left edge.
+     * @param {number} y - Top edge.
+     * @param {number} w - Width (may be negative).
+     * @param {number} h - Height (may be negative).
+     */
     constructor(x, y, w, h) {
         this.id = nextUid(); this.type = 'roundrect';
         this.x = x; this.y = y; this.width = w; this.height = h;
@@ -370,13 +617,27 @@ export class RoundRectShape {
         this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
     }
 
+    /** Returns the normalized axis-aligned bounding box. @returns {{ x: number, y: number, width: number, height: number }} */
     getBounds() { return normalize(this.x, this.y, this.width, this.height); }
 
+    /**
+     * Returns true if the point (px, py) falls inside the bounding rectangle.
+     * (Corner rounding is ignored for hit-testing simplicity.)
+     *
+     * @param {number} px - Pointer X in canvas space.
+     * @param {number} py - Pointer Y in canvas space.
+     * @returns {boolean}
+     */
     hitTest(px, py) {
         const { x, y, width, height } = this.getBounds();
         return px >= x && px <= x + width && py >= y && py <= y + height;
     }
 
+    /**
+     * Returns a deep copy of this shape, including the corner radius and all style properties.
+     *
+     * @returns {RoundRectShape}
+     */
     clone() {
         const s = new RoundRectShape(this.x, this.y, this.width, this.height);
         s.id = this.id; s.cornerRadius = this.cornerRadius;
@@ -384,6 +645,16 @@ export class RoundRectShape {
         return s;
     }
 
+    /**
+     * Builds a Path2D for the rounded rectangle with the corner radius clamped so
+     * it never exceeds half the shorter side.
+     *
+     * @param {number} x - Left edge.
+     * @param {number} y - Top edge.
+     * @param {number} w - Width.
+     * @param {number} h - Height.
+     * @returns {Path2D}
+     */
     _makePath(x, y, w, h) {
         const r = Math.min(this.cornerRadius, w / 2, h / 2);
         const p = new Path2D();
@@ -396,6 +667,13 @@ export class RoundRectShape {
         return p;
     }
 
+    /**
+     * Renders the rounded rectangle onto the canvas using the supplied pattern palette.
+     *
+     * @param {CanvasRenderingContext2D} ctx - Rendering context.
+     * @param {Array<CanvasPattern|string|null>} patterns - Indexed fill/stroke patterns.
+     * @param {boolean} qd - When true, snap coordinates to integer pixels (QuickDraw mode).
+     */
     draw(ctx, patterns, qd) {
         const { x, y, width, height } = this.getBounds();
         const px = qd ? snap(x) : x, py = qd ? snap(y) : y;
@@ -412,6 +690,21 @@ export class RoundRectShape {
     }
 }
 
+/**
+ * Appends an elliptical arc to a Path2D. Supports two modes:
+ * - Arbitrary angle span: when `startAngleDeg` and `arcAngleDeg` are provided,
+ *   angles follow Mac convention (0° = 12 o'clock, clockwise).
+ * - Quadrant mode: when angles are omitted, draws one of the four 90° quadrant arcs.
+ *
+ * @param {Path2D} path - The path to append to.
+ * @param {number} cx - Ellipse centre X.
+ * @param {number} cy - Ellipse centre Y.
+ * @param {number} rx - Horizontal radius.
+ * @param {number} ry - Vertical radius.
+ * @param {number} quadrant - Which 90° quadrant to draw (0–3) when angles are omitted.
+ * @param {number|undefined} startAngleDeg - Arc start angle in Mac degrees (optional).
+ * @param {number|undefined} arcAngleDeg - Arc sweep in degrees (optional).
+ */
 function _arcEllipse(path, cx, cy, rx, ry, quadrant, startAngleDeg, arcAngleDeg) {
     if (startAngleDeg !== undefined && arcAngleDeg !== undefined) {
         // Mac convention: 0° = 12 o'clock, clockwise. Canvas: 0 = 3 o'clock, CW with anticlockwise=false.
@@ -433,6 +726,15 @@ function _arcEllipse(path, cx, cy, rx, ry, quadrant, startAngleDeg, arcAngleDeg)
 // that faces the same direction as the quadrant.
 // rx = width/2, ry = height/2  (standard ellipse half-radii)
 export class ArcShape {
+    /**
+     * Creates an arc shape. By default shows the bottom-right quadrant (quadrant 1).
+     * When `startAngleDeg` and `arcAngleDeg` are set, an arbitrary angle span is used instead.
+     *
+     * @param {number} x - Left edge of the full inscribed ellipse bounding box.
+     * @param {number} y - Top edge of the full inscribed ellipse bounding box.
+     * @param {number} w - Width of the bounding box (may be negative).
+     * @param {number} h - Height of the bounding box (may be negative).
+     */
     constructor(x, y, w, h) {
         this.id = nextUid(); this.type = 'arc';
         this.x = x; this.y = y; this.width = w; this.height = h;
@@ -442,9 +744,16 @@ export class ArcShape {
         this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
     }
 
+    /** Returns the normalized bounding box of the full inscribed ellipse. @returns {{ x: number, y: number, width: number, height: number }} */
     getBounds() { return normalize(this.x, this.y, this.width, this.height); }
 
-    // Returns the bounding box of the visible arc (quadrant or arbitrary angle).
+    /**
+     * Returns the tight bounding box of only the visible arc portion (not the full ellipse).
+     * In quadrant mode this is simply one quarter of the ellipse's bounding box; in arbitrary-
+     * angle mode it samples cardinal points that fall within the sweep to get a correct envelope.
+     *
+     * @returns {{ x: number, y: number, width: number, height: number }}
+     */
     getSelectionBounds() {
         const { x, y, width: w, height: h } = normalize(this.x, this.y, this.width, this.height);
         const rx = w / 2, ry = h / 2, cx = x + rx, cy = y + ry;
@@ -476,7 +785,16 @@ export class ArcShape {
         }
     }
 
-    // Closed wedge path (for fill and hit-test)
+    /**
+     * Builds a closed pie-wedge Path2D (centre → arc → back to centre) used for
+     * filling the arc and for hit-testing.
+     *
+     * @param {number} x - Left edge of the ellipse bounding box.
+     * @param {number} y - Top edge.
+     * @param {number} w - Width.
+     * @param {number} h - Height.
+     * @returns {Path2D}
+     */
     _makeFillPath(x, y, w, h) {
         const cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
         const p = new Path2D();
@@ -486,7 +804,15 @@ export class ArcShape {
         return p;
     }
 
-    // Open arc path (for stroke only — no radii lines)
+    /**
+     * Builds an open arc Path2D (no radii lines) used for stroking the arc outline only.
+     *
+     * @param {number} x - Left edge of the ellipse bounding box.
+     * @param {number} y - Top edge.
+     * @param {number} w - Width.
+     * @param {number} h - Height.
+     * @returns {Path2D}
+     */
     _makeStrokePath(x, y, w, h) {
         const cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
         const p = new Path2D();
@@ -494,13 +820,25 @@ export class ArcShape {
         return p;
     }
 
+    /**
+     * Returns true if the pointer falls inside the filled arc wedge.
+     *
+     * @param {number} px - Pointer X in canvas space.
+     * @param {number} py - Pointer Y in canvas space.
+     * @returns {boolean}
+     */
     hitTest(px, py) {
         const { x, y, width, height } = this.getBounds();
         if (width === 0 || height === 0) return false;
         return getScratchCtx().isPointInPath(this._makeFillPath(x, y, width, height), px, py);
     }
 
-    // Returns [{x,y}, {x,y}] — screen positions of the arc's start and end handles.
+    /**
+     * Returns the canvas positions of the arc's two reshape handles — one at the
+     * start angle and one at the end angle, both lying on the ellipse perimeter.
+     *
+     * @returns {[{ x: number, y: number }, { x: number, y: number }]}
+     */
     getArcHandlePositions() {
         const { x, y, width: w, height: h } = this.getBounds();
         const cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
@@ -512,6 +850,11 @@ export class ArcShape {
         });
     }
 
+    /**
+     * Returns a deep copy of this shape, preserving quadrant, angle span, and all style properties.
+     *
+     * @returns {ArcShape}
+     */
     clone() {
         const s = new ArcShape(this.x, this.y, this.width, this.height);
         s.id = this.id; s.quadrant = this.quadrant;
@@ -522,6 +865,14 @@ export class ArcShape {
         return s;
     }
 
+    /**
+     * Renders the arc onto the canvas: fills the wedge if a fill pattern is set,
+     * then strokes only the arc curve (not the radii lines).
+     *
+     * @param {CanvasRenderingContext2D} ctx - Rendering context.
+     * @param {Array<CanvasPattern|string|null>} patterns - Indexed fill/stroke patterns.
+     * @param {boolean} qd - When true, snap coordinates to integer pixels (QuickDraw mode).
+     */
     draw(ctx, patterns, qd) {
         const { x, y, width, height } = this.getBounds();
         const px = qd ? snap(x) : x, py = qd ? snap(y) : y;
@@ -539,12 +890,24 @@ export class ArcShape {
 }
 
 export class GroupShape {
+    /**
+     * Creates a group that wraps an ordered list of child shapes and treats them
+     * as a single selectable/moveable unit.
+     *
+     * @param {Array<object>} [children=[]] - The shapes to group together.
+     */
     constructor(children = []) {
         this.id = nextUid(); this.type = 'group';
         this.children = children;
         this.locked = false;
     }
 
+    /**
+     * Returns the union bounding box of all children, i.e. the smallest rectangle
+     * that contains every child shape.
+     *
+     * @returns {{ x: number, y: number, width: number, height: number }}
+     */
     getBounds() {
         if (this.children.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
         const bs = this.children.map(c => c.getBounds());
@@ -555,14 +918,33 @@ export class GroupShape {
         return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
     }
 
+    /**
+     * Returns true if the pointer hits any child shape in the group.
+     *
+     * @param {number} px - Pointer X in canvas space.
+     * @param {number} py - Pointer Y in canvas space.
+     * @returns {boolean}
+     */
     hitTest(px, py) { return this.children.some(c => c.hitTest(px, py)); }
 
+    /**
+     * Returns a deep copy of this group with all children recursively cloned.
+     *
+     * @returns {GroupShape}
+     */
     clone() {
         const g = new GroupShape(this.children.map(c => c.clone()));
         g.id = this.id; g.locked = this.locked;
         return g;
     }
 
+    /**
+     * Renders all child shapes in order onto the canvas.
+     *
+     * @param {CanvasRenderingContext2D} ctx - Rendering context.
+     * @param {Array<CanvasPattern|string|null>} patterns - Indexed fill/stroke patterns.
+     * @param {boolean} qd - QuickDraw pixel-snapping flag, forwarded to each child.
+     */
     draw(ctx, patterns, qd) {
         for (const c of this.children) c.draw(ctx, patterns, qd);
     }
@@ -570,6 +952,13 @@ export class GroupShape {
 
 // ─── Shape transforms ─────────────────────────────────────────────────────────
 
+/**
+ * Applies a geometric transform to a shape in place, operating around the shape's
+ * own centre so the shape stays in position relative to itself.
+ *
+ * @param {object} shape - The shape to transform.
+ * @param {'flipH'|'flipV'|'rotate90CW'|'rotate90CCW'} op - The operation to apply.
+ */
 export function applyTransform(shape, op) {
     const b  = shape.getSelectionBounds?.() ?? shape.getBounds();
     const cx = b.x + b.width  / 2;
@@ -578,6 +967,14 @@ export function applyTransform(shape, op) {
     _applyTransformFn(shape, fn, op);
 }
 
+/**
+ * Returns a point-mapping function for the given transform operation, centred on (cx, cy).
+ *
+ * @param {'flipH'|'flipV'|'rotate90CW'|'rotate90CCW'} op - The operation.
+ * @param {number} cx - Horizontal centre of the transform.
+ * @param {number} cy - Vertical centre of the transform.
+ * @returns {(x: number, y: number) => { x: number, y: number }}
+ */
 function _makeTransformFn(op, cx, cy) {
     if (op === 'flipH')      return (x, y) => ({ x: 2 * cx - x, y });
     if (op === 'flipV')      return (x, y) => ({ x, y: 2 * cy - y });
@@ -585,6 +982,16 @@ function _makeTransformFn(op, cx, cy) {
     /* rotate90CCW */        return (x, y) => ({ x: cx - (y - cy), y: cy + (x - cx) });
 }
 
+/**
+ * Applies a point-mapping function to all coordinates of a shape, handling each
+ * shape type's coordinate layout. Arc shapes additionally remap their quadrant index
+ * so the visual appearance is preserved after the transform.
+ *
+ * @param {object} shape - The shape to mutate.
+ * @param {(x: number, y: number) => { x: number, y: number }} fn - The coordinate transform.
+ * @param {'flipH'|'flipV'|'rotate90CW'|'rotate90CCW'|null} [op=null] - The named operation,
+ *   needed for arc-quadrant remapping logic.
+ */
 function _applyTransformFn(shape, fn, op = null) {
     if (shape.type === 'line') {
         const p1 = fn(shape.x1, shape.y1), p2 = fn(shape.x2, shape.y2);
@@ -649,6 +1056,16 @@ function _applyTransformFn(shape, fn, op = null) {
 }
 
 export class TextShape {
+    /**
+     * Creates a text shape at the given position.
+     *
+     * @param {number} x - Left edge of the text block.
+     * @param {number} y - Top edge of the text block.
+     * @param {string} [text=''] - Initial text content (may contain newlines).
+     * @param {string} [fontFamily='Geneva'] - Font family name.
+     * @param {number} [fontSize=12] - Font size in points/pixels.
+     * @param {number} [fontStyle=0] - Style bitmask: 1=bold, 2=italic, 4=underline, 8=outline, 16=shadow.
+     */
     constructor(x, y, text = '', fontFamily = 'Geneva', fontSize = 12, fontStyle = 0) {
         this.id = nextUid(); this.type = 'text';
         this.x = x; this.y = y;
@@ -659,14 +1076,27 @@ export class TextShape {
         this.fillIdx = 0; this.strokeWidth = 0; this.locked = false;
     }
 
+    /**
+     * Builds the CSS font string for the canvas context from the shape's
+     * family, size, and style bitmask.
+     *
+     * @returns {string} A CSS font value, e.g. `'italic bold 12px Geneva'`.
+     */
     _cssFont() {
         const bold   = (this.fontStyle & 1) ? 'bold '   : '';
         const italic = (this.fontStyle & 2) ? 'italic ' : '';
         return `${italic}${bold}${this.fontSize}px ${fontCss(this.fontFamily)}`;
     }
 
+    /** Returns the line height in pixels (125% of the font size). @returns {number} */
     _lineHeight() { return Math.ceil(this.fontSize * 1.25); }
 
+    /**
+     * Measures the text using a scratch canvas context and returns the bounding box.
+     * Width is the widest line; height is line count × line height. Minimum width is 20px.
+     *
+     * @returns {{ x: number, y: number, width: number, height: number }}
+     */
     getBounds() {
         const ctx = getScratchCtx();
         ctx.font = this._cssFont();
@@ -675,17 +1105,38 @@ export class TextShape {
         return { x: this.x, y: this.y, width: maxW, height: lines.length * this._lineHeight() };
     }
 
+    /**
+     * Returns true if the pointer falls inside the text bounding box.
+     *
+     * @param {number} px - Pointer X in canvas space.
+     * @param {number} py - Pointer Y in canvas space.
+     * @returns {boolean}
+     */
     hitTest(px, py) {
         const b = this.getBounds();
         return px >= b.x && px <= b.x + b.width && py >= b.y && py <= b.y + b.height;
     }
 
+    /**
+     * Returns a deep copy of this shape, preserving text content, font settings, and ID.
+     *
+     * @returns {TextShape}
+     */
     clone() {
         const t = new TextShape(this.x, this.y, this.text, this.fontFamily, this.fontSize, this.fontStyle);
         t.id = this.id; t.locked = this.locked;
         return t;
     }
 
+    /**
+     * Renders the text onto the canvas, applying any active style effects: shadow (offset
+     * fill), outline (white fill + black stroke), and underline (hand-drawn rule).
+     * Bold and italic are handled by the CSS font string.
+     *
+     * @param {CanvasRenderingContext2D} ctx - Rendering context.
+     * @param {*} _p - Unused (patterns not applicable to text).
+     * @param {*} _q - Unused (text is not pixel-snapped).
+     */
     draw(ctx, _p, _q) {
         if (!this.text) return;
         const lines = this.text.split('\n');

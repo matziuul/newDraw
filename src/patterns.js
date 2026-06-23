@@ -42,6 +42,14 @@ export const QD_PATTERNS = [
     { name: 'timglas',    rows: [0x82,0x44,0x28,0x10,0x28,0x44,0x82,0x01] }, // 36
 ];
 
+/**
+ * Converts an 8-row QuickDraw bitmap pattern into a repeating Canvas 2D pattern.
+ * Each row is a byte where bit 7 is the leftmost pixel: set = black, clear = white.
+ *
+ * @param {CanvasRenderingContext2D} ctx - The rendering context that will own the pattern.
+ * @param {number[]} rows - Array of 8 bytes describing the 8×8 tile.
+ * @returns {CanvasPattern} A tiling pattern ready to assign to ctx.fillStyle / ctx.strokeStyle.
+ */
 export function buildPattern(ctx, rows) {
     const off = document.createElement('canvas');
     off.width = 8; off.height = 8;

@@ -52,7 +52,20 @@ const MENUS = [
     ]},
 ];
 
+/** Manages the application menu bar: builds the DOM, handles open/close state, and dispatches menu actions. */
 export class MenuSystem {
+    /**
+     * @param {object} opts
+     * @param {object} opts.state - Shared application state (shapes, selection, clipboard, etc.).
+     * @param {object} opts.history - Undo/redo history manager.
+     * @param {object} opts.renderer - Canvas renderer used to trigger redraws.
+     * @param {HTMLCanvasElement} opts.canvas - The main drawing canvas (provides width/height for export).
+     * @param {HTMLInputElement} opts.importInput - Hidden file input for PICT import.
+     * @param {HTMLInputElement} opts.docInput - Hidden file input for opening saved documents.
+     * @param {Function} opts.saveDoc - Callback that saves the current document.
+     * @param {object} opts.toolController - Tool controller whose `syncUI` and `syncOverlayStyle` keep the UI consistent after state changes.
+     * @param {Function} [opts.onCanvasSize] - Optional callback invoked when the user chooses "Canvas Size…".
+     */
     constructor({ state, history, renderer, canvas, importInput, docInput, saveDoc, toolController, onCanvasSize }) {
         this.state    = state;
         this.history  = history;
@@ -71,6 +84,7 @@ export class MenuSystem {
 
     // ── Build DOM ─────────────────────────────────────────────────────────────
 
+    /** Constructs and inserts all menu DOM nodes into `.menu-bar`, including dropdowns and sub-menus. */
     _build() {
         const bar = document.querySelector('.menu-bar');
         const title = bar.querySelector('.menu-title');
@@ -188,6 +202,13 @@ export class MenuSystem {
 
     // ── Dropdown open / close ─────────────────────────────────────────────────
 
+    /**
+     * Opens the dropdown for the given menu, closing any currently open menu first.
+     * Also refreshes item enabled/checked states before the dropdown becomes visible.
+     * @param {string} id - The menu id (e.g. `'file'`, `'edit'`).
+     * @param {HTMLElement} head - The clickable menu-header element to mark as open.
+     * @param {HTMLElement} drop - The dropdown panel element to show.
+     */
     _openDrop(id, head, drop) {
         this._closeAll();
         this._open = id;
@@ -196,12 +217,18 @@ export class MenuSystem {
         this._updateRowStates(drop);
     }
 
+    /** Closes every open dropdown and clears the tracked open-menu id. */
     _closeAll() {
         this._open = null;
         document.querySelectorAll('.menu-head.open').forEach(h => h.classList.remove('open'));
         document.querySelectorAll('.menu-drop.open').forEach(d => d.classList.remove('open'));
     }
 
+    /**
+     * Refreshes the enabled/disabled state of all rows in a dropdown based on the current
+     * selection and clipboard, and updates checkmarks for the active font, size, and style.
+     * @param {HTMLElement} drop - The dropdown panel whose rows should be updated.
+     */
     _updateRowStates(drop) {
         const hasSel   = !!this.state.selectedId;
         const hasClip  = !!this.state.clipboard;
@@ -240,6 +267,10 @@ export class MenuSystem {
 
     // ── Global event listeners ────────────────────────────────────────────────
 
+    /**
+     * Registers document-level event listeners for closing menus on outside clicks
+     * and for handling keyboard shortcuts that belong to the menu system (File, Arrange, Text).
+     */
     _attachGlobal() {
         document.addEventListener('mousedown', e => {
             if (!e.target.closest('.menu-wrap')) this._closeAll();
@@ -303,6 +334,12 @@ export class MenuSystem {
 
     // ── Action dispatch ───────────────────────────────────────────────────────
 
+    /**
+     * Dispatches a named menu action, mutating state and committing to history as needed.
+     * Covers File (new/open/save/export/print), Edit (undo/redo/copy/paste/duplicate/delete),
+     * Arrange (group/ungroup/layer order/transforms/lock), and Text (font/size/style) actions.
+     * @param {string} action - The action identifier, e.g. `'save'`, `'group'`, `'font:Helvetica'`, `'textStyle:1'`.
+     */
     _execute(action) {
         const { state, history, renderer } = this;
         const sel = state.selectedShape;
@@ -486,6 +523,10 @@ export class MenuSystem {
         }
     }
 
+    /**
+     * Changes the z-order of the currently selected shape in the shapes array and commits the change.
+     * @param {1 | -1 | 2 | -2} mode - `1` = bring to front, `-1` = send to back, `2` = bring forward one step, `-2` = send backward one step.
+     */
     _reorder(mode) {
         const { state, history, renderer } = this;
         const sel = state.selectedShape;

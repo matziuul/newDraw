@@ -2,6 +2,12 @@ import { QD_PATTERNS, buildPattern } from './patterns.js';
 import { getHandlePoints, HS, normalize } from './shapes.js';
 
 export class Renderer {
+    /**
+     * Creates a Renderer bound to a canvas element and application state.
+     *
+     * @param {HTMLCanvasElement} canvas - The canvas to draw into.
+     * @param {object} state - Shared application state (shapes, zoom, selection, etc.).
+     */
     constructor(canvas, state) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
@@ -9,6 +15,11 @@ export class Renderer {
         this.patterns = QD_PATTERNS.map(p => p.rows ? buildPattern(this.ctx, p.rows) : null);
     }
 
+    /**
+     * Performs a full repaint of the canvas: grid, page markers, ruler origin,
+     * all shapes, selection overlays, rubber-band rect, and the current draft shape.
+     * Call this whenever visible state changes.
+     */
     render() {
         const { ctx, canvas, state, patterns } = this;
         const z = state.zoom ?? 1;
@@ -44,6 +55,7 @@ export class Renderer {
         if (state.currentDraft) this._drawDraft(state.currentDraft);
     }
 
+    /** Draws a light blue grid over the entire canvas at the current grid step size. */
     _drawGrid() {
         const { ctx, canvas, state } = this;
         const z = this._z ?? 1;
@@ -65,6 +77,15 @@ export class Renderer {
         ctx.restore();
     }
 
+    /**
+     * Draws a dashed preview outline for a shape currently being drawn by the user.
+     * Delegates to {@link _drawBezierDraft} for bezier paths; handles all other
+     * shape types (line, ellipse, roundrect, arc, rect) directly.
+     *
+     * @param {object} d - Draft descriptor with at minimum a `type` field and the
+     *   geometry needed for that type (e.g. x1/y1/x2/y2 for lines, x/y/width/height
+     *   for box-based shapes).
+     */
     _drawDraft(d) {
         const ctx = this.ctx;
         ctx.save();
@@ -115,6 +136,16 @@ export class Renderer {
         ctx.restore();
     }
 
+    /**
+     * Draws the in-progress bezier path while the user is placing anchor points.
+     * Renders committed curve segments, a preview line from the last anchor to the
+     * current mouse position, and editable control-handle circles for each anchor.
+     *
+     * @param {object} d - Bezier draft descriptor.
+     * @param {Array<{x: number, y: number, c1x: number, c1y: number, c2x: number, c2y: number}>} d.points - Anchor points placed so far.
+     * @param {number} d.mouseX - Current mouse X position for the preview line.
+     * @param {number} d.mouseY - Current mouse Y position for the preview line.
+     */
     _drawBezierDraft(d) {
         const ctx = this.ctx, pts = d.points;
         if (pts.length === 0) return;
@@ -161,6 +192,12 @@ export class Renderer {
         }
     }
 
+    /**
+     * Draws a thin dashed blue outline around a shape that is part of a multi-selection.
+     * Unlike the single-selection overlay, no resize handles are shown.
+     *
+     * @param {object} shape - A shape object that exposes a `getBounds()` method.
+     */
     _drawMultiOutline(shape) {
         const b = shape.getBounds();
         const ctx = this.ctx;
@@ -172,6 +209,12 @@ export class Renderer {
         ctx.restore();
     }
 
+    /**
+     * Draws the rubber-band (marquee) selection rectangle while the user is dragging
+     * to select multiple shapes. Filled with a translucent blue tint and a dashed border.
+     *
+     * @param {{x: number, y: number, w: number, h: number}} rb - The rubber-band rectangle.
+     */
     _drawRubberBand(rb) {
         const ctx = this.ctx;
         const z = this._z ?? 1;
@@ -184,6 +227,16 @@ export class Renderer {
         ctx.restore();
     }
 
+    /**
+     * Draws the selection overlay for the currently selected shape: a dashed blue
+     * bounding-box outline plus eight resize handles (corners and edge midpoints).
+     * Groups and text shapes receive only the dashed outline. Locked shapes show
+     * greyed-out handles. Arc shapes get additional circular endpoint handles for
+     * sweep reshaping.
+     * Delegates to {@link _drawBezierSelection} for bezier shapes.
+     *
+     * @param {object} shape - The currently selected shape object.
+     */
     _drawSelection(shape) {
         if (shape.type === 'bezier') { this._drawBezierSelection(shape); return; }
 
@@ -227,6 +280,15 @@ export class Renderer {
         ctx.restore();
     }
 
+    /**
+     * Draws the selection overlay for a bezier shape: anchor squares and Bezier
+     * control-handle circles connected by arm lines. Active handles (hovered or
+     * being dragged) are highlighted with a larger, inverted style. Locked bezier
+     * shapes receive only a dashed bounding-box outline.
+     *
+     * @param {object} shape - The selected bezier shape, with a `points` array and
+     *   a `locked` flag.
+     */
     _drawBezierSelection(shape) {
         const ctx = this.ctx;
         const z = this._z ?? 1;
@@ -301,6 +363,10 @@ export class Renderer {
         ctx.restore();
     }
 
+    /**
+     * Draws dashed blue lines across the canvas to indicate page boundaries, based
+     * on the page width and height stored in state. Useful for print-layout mode.
+     */
     _drawPageMarkers() {
         const { ctx, canvas, state } = this;
         const z = this._z ?? 1;
@@ -323,6 +389,15 @@ export class Renderer {
         ctx.restore();
     }
 
+    /**
+     * Draws dashed crosshair lines at the ruler origin position to indicate where
+     * measurements start. When the user is actively dragging the origin, the lines
+     * are rendered slightly brighter to signal the drag-preview state.
+     *
+     * @param {number} ox - Horizontal position of the origin (canvas coordinates).
+     * @param {number} oy - Vertical position of the origin (canvas coordinates).
+     * @param {boolean} isPreview - True while the origin is being dragged (brightens the crosshair).
+     */
     _drawOriginCrosshair(ox, oy, isPreview) {
         const { ctx, canvas } = this;
         const z = this._z ?? 1;
