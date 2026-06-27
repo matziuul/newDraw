@@ -1,4 +1,17 @@
 import { fontCss } from './text-defs.js';
+import { QD_PATTERNS, buildPattern } from './patterns.js';
+
+// Per-(idx,color) cache of tinted CanvasPatterns, keyed by "<idx>_<color>".
+const _tintCache = new Map();
+
+function _tintedPattern(ctx, idx, color) {
+    const key = `${idx}_${color}`;
+    if (_tintCache.has(key)) return _tintCache.get(key);
+    const rows = QD_PATTERNS[idx]?.rows;
+    const pat  = rows ? buildPattern(ctx, rows, color) : null;
+    _tintCache.set(key, pat);
+    return pat;
+}
 
 export const ARROW_MODES = [
     { name: 'Ingen', start: false, end: false },
@@ -235,7 +248,7 @@ export class RectangleShape {
     constructor(x, y, w, h) {
         this.id = nextUid(); this.type = 'rectangle';
         this.x = x; this.y = y; this.width = w; this.height = h;
-        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.fillColor = null; this.strokeColor = null; this.locked = false;
     }
 
     /** Returns the normalized (positive-size) axis-aligned bounding box. @returns {{ x: number, y: number, width: number, height: number }} */
@@ -260,7 +273,7 @@ export class RectangleShape {
      */
     clone() {
         const s = new RectangleShape(this.x, this.y, this.width, this.height);
-        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
+        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.fillColor = this.fillColor; s.strokeColor = this.strokeColor; s.locked = this.locked;
         return s;
     }
 
@@ -278,9 +291,9 @@ export class RectangleShape {
         ctx.save();
         ctx.lineWidth = this.strokeWidth;
         ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
-        const pat = patterns[this.fillIdx];
+        const pat = this.fillColor ? _tintedPattern(ctx, this.fillIdx, this.fillColor) : patterns[this.fillIdx];
         if (pat) { ctx.fillStyle = pat; ctx.fillRect(px - 0.5, py - 0.5, pw, ph); }
-        const strokePat = patterns[this.strokePatternIdx ?? 3];
+        const strokePat = this.strokeColor ? _tintedPattern(ctx, this.strokePatternIdx ?? 3, this.strokeColor) : patterns[this.strokePatternIdx ?? 3];
         if (strokePat !== null) { ctx.strokeStyle = strokePat; ctx.strokeRect(px, py, pw, ph); }
         ctx.restore();
     }
@@ -298,7 +311,7 @@ export class EllipseShape {
     constructor(x, y, w, h) {
         this.id = nextUid(); this.type = 'ellipse';
         this.x = x; this.y = y; this.width = w; this.height = h;
-        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.fillColor = null; this.strokeColor = null; this.locked = false;
     }
 
     /** Returns the normalized axis-aligned bounding box. @returns {{ x: number, y: number, width: number, height: number }} */
@@ -327,7 +340,7 @@ export class EllipseShape {
      */
     clone() {
         const s = new EllipseShape(this.x, this.y, this.width, this.height);
-        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
+        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.fillColor = this.fillColor; s.strokeColor = this.strokeColor; s.locked = this.locked;
         return s;
     }
 
@@ -347,9 +360,9 @@ export class EllipseShape {
         ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
         ctx.beginPath();
         ctx.ellipse(px + pw / 2, py + ph / 2, pw / 2, ph / 2, 0, 0, Math.PI * 2);
-        const pat = patterns[this.fillIdx];
+        const pat = this.fillColor ? _tintedPattern(ctx, this.fillIdx, this.fillColor) : patterns[this.fillIdx];
         if (pat) { ctx.fillStyle = pat; ctx.fill(); }
-        const strokePat = patterns[this.strokePatternIdx ?? 3];
+        const strokePat = this.strokeColor ? _tintedPattern(ctx, this.strokePatternIdx ?? 3, this.strokeColor) : patterns[this.strokePatternIdx ?? 3];
         if (strokePat !== null) { ctx.strokeStyle = strokePat; ctx.stroke(); }
         ctx.restore();
     }
@@ -368,7 +381,7 @@ export class LineShape {
     constructor(x1, y1, x2, y2) {
         this.id = nextUid(); this.type = 'line';
         this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2;
-        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.arrowMode = 0; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.arrowMode = 0; this.fillColor = null; this.strokeColor = null; this.locked = false;
     }
 
     /**
@@ -405,7 +418,7 @@ export class LineShape {
      */
     clone() {
         const s = new LineShape(this.x1, this.y1, this.x2, this.y2);
-        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.arrowMode = this.arrowMode; s.locked = this.locked;
+        s.id = this.id; s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.arrowMode = this.arrowMode; s.fillColor = this.fillColor; s.strokeColor = this.strokeColor; s.locked = this.locked;
         return s;
     }
 
@@ -422,7 +435,7 @@ export class LineShape {
         const y1 = qd ? snap(this.y1) + 0.5 : this.y1;
         const x2 = qd ? snap(this.x2) + 0.5 : this.x2;
         const y2 = qd ? snap(this.y2) + 0.5 : this.y2;
-        const strokePat = patterns[this.strokePatternIdx ?? 3];
+        const strokePat = this.strokeColor ? _tintedPattern(ctx, this.strokePatternIdx ?? 3, this.strokeColor) : patterns[this.strokePatternIdx ?? 3];
         if (strokePat === null) return;
 
         const mode = ARROW_MODES[this.arrowMode ?? 0];
@@ -481,7 +494,7 @@ export class BezierShape {
     constructor(points = []) {
         this.id = nextUid(); this.type = 'bezier';
         this.points = points;
-        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.arrowMode = 0; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.arrowMode = 0; this.fillColor = null; this.strokeColor = null; this.locked = false;
     }
 
     /**
@@ -537,7 +550,7 @@ export class BezierShape {
      */
     clone() {
         const b = new BezierShape(this.points.map(p => ({ ...p })));
-        b.id = this.id; b.fillIdx = this.fillIdx; b.strokeWidth = this.strokeWidth; b.strokeDash = this.strokeDash; b.strokePatternIdx = this.strokePatternIdx; b.arrowMode = this.arrowMode; b.locked = this.locked;
+        b.id = this.id; b.fillIdx = this.fillIdx; b.strokeWidth = this.strokeWidth; b.strokeDash = this.strokeDash; b.strokePatternIdx = this.strokePatternIdx; b.arrowMode = this.arrowMode; b.fillColor = this.fillColor; b.strokeColor = this.strokeColor; b.locked = this.locked;
         return b;
     }
 
@@ -577,7 +590,7 @@ export class BezierShape {
      */
     draw(ctx, patterns, _qd) {
         if (this.points.length < 2) return;
-        const strokePat = patterns[this.strokePatternIdx ?? 3];
+        const strokePat = this.strokeColor ? _tintedPattern(ctx, this.strokePatternIdx ?? 3, this.strokeColor) : patterns[this.strokePatternIdx ?? 3];
         ctx.save();
         // Canvas anti-aliasing makes 45° strokes appear ~0.71× as heavy as axis-aligned
         // strokes at the same lineWidth. Compensate for 1px pens by rendering at √2 ≈ 1.41px
@@ -586,7 +599,7 @@ export class BezierShape {
         ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
         const path = this._makePath();
-        const pat = patterns[this.fillIdx];
+        const pat = this.fillColor ? _tintedPattern(ctx, this.fillIdx, this.fillColor) : patterns[this.fillIdx];
         if (pat) { ctx.fillStyle = pat; ctx.fill(path); }
         if (strokePat !== null) {
             ctx.strokeStyle = strokePat; ctx.fillStyle = strokePat;
@@ -614,7 +627,7 @@ export class RoundRectShape {
         this.id = nextUid(); this.type = 'roundrect';
         this.x = x; this.y = y; this.width = w; this.height = h;
         this.cornerRadius = 10;
-        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.fillColor = null; this.strokeColor = null; this.locked = false;
     }
 
     /** Returns the normalized axis-aligned bounding box. @returns {{ x: number, y: number, width: number, height: number }} */
@@ -641,7 +654,7 @@ export class RoundRectShape {
     clone() {
         const s = new RoundRectShape(this.x, this.y, this.width, this.height);
         s.id = this.id; s.cornerRadius = this.cornerRadius;
-        s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
+        s.fillIdx = this.fillIdx; s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash; s.strokePatternIdx = this.strokePatternIdx; s.fillColor = this.fillColor; s.strokeColor = this.strokeColor; s.locked = this.locked;
         return s;
     }
 
@@ -682,9 +695,9 @@ export class RoundRectShape {
         ctx.lineWidth = this.strokeWidth;
         ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
         const path = this._makePath(px, py, pw, ph);
-        const pat = patterns[this.fillIdx];
+        const pat = this.fillColor ? _tintedPattern(ctx, this.fillIdx, this.fillColor) : patterns[this.fillIdx];
         if (pat) { ctx.fillStyle = pat; ctx.fill(path); }
-        const strokePat = patterns[this.strokePatternIdx ?? 3];
+        const strokePat = this.strokeColor ? _tintedPattern(ctx, this.strokePatternIdx ?? 3, this.strokeColor) : patterns[this.strokePatternIdx ?? 3];
         if (strokePat !== null) { ctx.strokeStyle = strokePat; ctx.stroke(path); }
         ctx.restore();
     }
@@ -741,7 +754,7 @@ export class ArcShape {
         this.quadrant = 1; // default: bottom-right
         this.startAngleDeg = undefined; // set for reshape arcs (arbitrary angle span)
         this.arcAngleDeg   = undefined;
-        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.locked = false;
+        this.fillIdx = 0; this.strokeWidth = 2; this.strokeDash = 0; this.strokePatternIdx = 3; this.fillColor = null; this.strokeColor = null; this.locked = false;
     }
 
     /** Returns the normalized bounding box of the full inscribed ellipse. @returns {{ x: number, y: number, width: number, height: number }} */
@@ -861,7 +874,7 @@ export class ArcShape {
         s.startAngleDeg = this.startAngleDeg; s.arcAngleDeg = this.arcAngleDeg;
         s.fillIdx = this.fillIdx;
         s.strokeWidth = this.strokeWidth; s.strokeDash = this.strokeDash;
-        s.strokePatternIdx = this.strokePatternIdx; s.locked = this.locked;
+        s.strokePatternIdx = this.strokePatternIdx; s.fillColor = this.fillColor; s.strokeColor = this.strokeColor; s.locked = this.locked;
         return s;
     }
 
@@ -881,9 +894,9 @@ export class ArcShape {
         ctx.save();
         ctx.lineWidth = this.strokeWidth;
         ctx.setLineDash(STROKE_DASHES[this.strokeDash ?? 0].dash);
-        const pat = patterns[this.fillIdx];
+        const pat = this.fillColor ? _tintedPattern(ctx, this.fillIdx, this.fillColor) : patterns[this.fillIdx];
         if (pat) { ctx.fillStyle = pat; ctx.fill(this._makeFillPath(px, py, pw, ph)); }
-        const strokePat = patterns[this.strokePatternIdx ?? 3];
+        const strokePat = this.strokeColor ? _tintedPattern(ctx, this.strokePatternIdx ?? 3, this.strokeColor) : patterns[this.strokePatternIdx ?? 3];
         if (strokePat !== null) { ctx.strokeStyle = strokePat; ctx.stroke(this._makeStrokePath(px, py, pw, ph)); }
         ctx.restore();
     }

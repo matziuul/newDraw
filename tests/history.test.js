@@ -105,4 +105,14 @@ describe('History', () => {
         history.undo();
         expect(state.shapes).toHaveLength(0);
     });
+
+    it('reset clears both stacks so undo and redo return false', () => {
+        const snap = history.savePreOp();
+        state.shapes.push(new RectangleShape(0, 0, 50, 50));
+        history.commit(snap);
+        history.undo(); // moves snap onto redo stack
+        history.reset();
+        expect(history.undo()).toBe(false);
+        expect(history.redo()).toBe(false);
+    });
 });

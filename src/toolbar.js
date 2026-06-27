@@ -115,6 +115,8 @@ export class Toolbar {
                     replacement.strokeWidth = sel.strokeWidth;
                     replacement.strokeDash = sel.strokeDash ?? 0;
                     replacement.strokePatternIdx = sel.strokePatternIdx;
+                    replacement.fillColor   = sel.fillColor   ?? null;
+                    replacement.strokeColor = sel.strokeColor ?? null;
                     replacement.locked = sel.locked ?? false;
                     const idx = this.state.shapes.indexOf(sel);
                     if (idx >= 0) this.state.shapes[idx] = replacement;

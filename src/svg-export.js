@@ -33,8 +33,10 @@ function buildFillsImage(shapes, width, height) {
     const patterns = QD_PATTERNS.map(p => p.rows ? buildPattern(ctx, p.rows) : null);
 
     for (const shape of shapes) {
-        const pat = patterns[shape.fillIdx];
-        if (pat === null) continue;
+        const rows = QD_PATTERNS[shape.fillIdx]?.rows;
+        if (!rows) continue;
+        const pat = shape.fillColor ? buildPattern(ctx, rows, shape.fillColor) : patterns[shape.fillIdx];
+        if (!pat) continue;
 
         ctx.fillStyle = pat;
         if (shape.type === 'rectangle') {
@@ -75,20 +77,28 @@ function buildFillsImage(shapes, width, height) {
 
 /**
  * Renders a single 8×8 QuickDraw bit-pattern tile to a PNG data URL for use as an SVG `<pattern>` image.
- * Set bits are drawn black; clear bits are drawn white.
- * @param {number[]} rows - Array of 8 bytes, one per row, where each bit represents a pixel (MSB = leftmost).
+ * @param {number[]} rows - Array of 8 bytes, one per row.
+ * @param {string|null} [color] - Hex ink color (default black).
  * @returns {string} A `data:image/png;base64,…` URL of the 8×8 tile.
  */
-function patternTileDataUrl(rows) {
+function patternTileDataUrl(rows, color) {
     const c = document.createElement('canvas');
     c.width = 8; c.height = 8;
     const ctx = c.getContext('2d');
     const img = ctx.createImageData(8, 8);
+    let ir = 0, ig = 0, ib = 0;
+    if (color && color.length === 7 && color[0] === '#') {
+        ir = parseInt(color.slice(1, 3), 16);
+        ig = parseInt(color.slice(3, 5), 16);
+        ib = parseInt(color.slice(5, 7), 16);
+    }
     for (let y = 0; y < 8; y++) {
         for (let x = 0; x < 8; x++) {
             const on = rows[y] & (1 << (7 - x));
             const i = (y * 8 + x) * 4;
-            img.data[i] = img.data[i+1] = img.data[i+2] = on ? 0 : 255;
+            img.data[i]   = on ? ir : 255;
+            img.data[i+1] = on ? ig : 255;
+            img.data[i+2] = on ? ib : 255;
             img.data[i+3] = 255;
         }
     }
@@ -106,11 +116,18 @@ function patternTileDataUrl(rows) {
 function buildDefs(shapes) {
     const parts = [];
 
-    const patIndices = [...new Set(shapes.map(s => s.strokePatternIdx ?? 3))]
-        .filter(i => i !== 0 && i !== 3 && QD_PATTERNS[i]?.rows);
-    for (const i of patIndices) {
-        const url = patternTileDataUrl(QD_PATTERNS[i].rows);
-        parts.push(`<pattern id="sp${i}" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse"><image href="${url}" width="8" height="8"/></pattern>`);
+    // Collect unique (strokePatternIdx, strokeColor) combos that need a <pattern> def
+    const seen = new Set();
+    for (const s of shapes) {
+        const idx = s.strokePatternIdx ?? 3;
+        if (idx === 0 || idx === 3 || !QD_PATTERNS[idx]?.rows) continue;
+        const color = s.strokeColor ?? null;
+        const key = `${idx}_${color ?? ''}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const id  = color ? `sp${idx}_${color.slice(1)}` : `sp${idx}`;
+        const url = patternTileDataUrl(QD_PATTERNS[idx].rows, color);
+        parts.push(`<pattern id="${id}" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse"><image href="${url}" width="8" height="8"/></pattern>`);
     }
 
     const needsArrow = shapes.some(s => s.arrowMode && s.arrowMode !== 0);
@@ -131,9 +148,11 @@ function buildDefs(shapes) {
  */
 function strokeAttr(shape) {
     const idx = shape.strokePatternIdx ?? 3;
+    const color = shape.strokeColor ?? null;
     if (idx === 0) return 'stroke="none"';
-    if (idx === 3) return 'stroke="black"';
-    return `stroke="url(#sp${idx})"`;
+    if (idx === 3) return `stroke="${color ?? 'black'}"`;
+    const id = color ? `sp${idx}_${color.slice(1)}` : `sp${idx}`;
+    return `stroke="url(#${id})"`;
 }
 
 /**

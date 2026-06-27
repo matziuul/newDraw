@@ -307,13 +307,20 @@ describe('freehand.pict — freehand polygon as bezier', () => {
     });
 });
 
-// ── freehand.drw — unsupported record type ───────────────────────────────────
+// ── freehand.drw — freehand stroke approximated as bezier ────────────────────
 
-describe('freehand.drw — bezier freehand not supported by MacDraw II parser', () => {
-    it('detects MacDraw II format and produces no shapes', () => {
-        const result = importMacFile(loadFile('freehand.drw'));
-        expect(result.format).toBe('MacDraw II');
-        expect(result.shapes).toHaveLength(0);
+describe('freehand.drw — freehand stroke converted to BezierShape', () => {
+    let result;
+    beforeAll(() => { result = importMacFile(loadFile('freehand.drw')); });
+
+    it('detects MacDraw II format', () => expect(result.format).toBe('MacDraw II'));
+    it('produces exactly 1 shape', () => expect(result.shapes).toHaveLength(1));
+    it('is a bezier', () => expect(result.shapes[0].type).toBe('bezier'));
+    it('has multiple points (Catmull-Rom approximation)', () => {
+        expect(result.shapes[0].points.length).toBeGreaterThan(1);
+    });
+    it('has strokeWidth 1 (original pen width)', () => {
+        expect(result.shapes[0].strokeWidth).toBe(1);
     });
 });
 

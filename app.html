@@ -558,6 +558,82 @@
             padding: 3px 16px; border: 2px solid black; background: white; cursor: pointer;
         }
         #canvasSizeDialog button.primary { background: black; color: white; }
+
+        /* ── Color Picker palette ── */
+        .mac-palette {
+            position: fixed;
+            top: 100px;
+            right: 164px;
+            z-index: 900;
+            background: white;
+            border: 1px solid black;
+            box-shadow: 2px 2px 0 rgba(0,0,0,0.35);
+            font-family: Geneva, Chicago, Arial, sans-serif;
+            font-size: 11px;
+            user-select: none;
+        }
+        .mac-palette-title {
+            background: repeating-linear-gradient(to bottom, #888 0, #888 1px, #e0e0e0 1px, #e0e0e0 2px);
+            padding: 3px 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            min-height: 22px;
+        }
+        .mac-palette-label {
+            background: #e0e0e0;
+            padding: 0 6px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .mac-palette-close {
+            position: absolute;
+            right: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #e0e0e0;
+            border: 1px solid #888;
+            cursor: pointer;
+            font-size: 9px;
+            padding: 0 3px;
+            line-height: 1.5;
+            color: #333;
+        }
+        .mac-palette-close:hover { background: #ccc; }
+        .mac-palette-body { padding: 8px; }
+        .cp-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+        .cp-tab {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: pointer;
+            border: 2px solid transparent;
+            padding: 3px;
+            border-radius: 2px;
+            font-size: 10px;
+        }
+        .cp-tab-active { border-color: #000; }
+        .cp-swatch { width: 28px; height: 28px; border: 1px solid #888; margin-bottom: 3px; }
+        #_cpCanvas { display: block; cursor: crosshair; }
+        .cp-bottom { display: flex; align-items: center; gap: 5px; margin-top: 7px; }
+        .cp-none-btn {
+            font: 11px Geneva, Chicago, Arial, sans-serif;
+            padding: 2px 7px;
+            border: 1px solid #888;
+            background: white;
+            cursor: pointer;
+        }
+        .cp-none-btn:hover { background: #eee; }
+        .cp-hex {
+            width: 62px;
+            font: 11px monospace;
+            border: 1px solid #888;
+            padding: 1px 3px;
+            height: 20px;
+        }
+        .cp-preview { flex: 1; height: 20px; border: 1px solid #888; }
     </style>
 </head>
 <body>

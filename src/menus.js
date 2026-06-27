@@ -50,6 +50,9 @@ const MENUS = [
         '-',
         ...STYLE_DEFS.map(s => ({ label: s.name, kbd: s.kbd ?? null, action: `textStyle:${s.id}` })),
     ]},
+    { id: 'window', label: 'Window', items: [
+        { label: 'Colors…', kbd: '⇧⌘K', action: 'showColors' },
+    ]},
 ];
 
 /** Manages the application menu bar: builds the DOM, handles open/close state, and dispatches menu actions. */
@@ -329,6 +332,9 @@ export class MenuSystem {
             if (e.key === 'u' && !e.shiftKey) {
                 e.preventDefault(); this._execute('textStyle:4');
             }
+            if (e.key === 'k' && e.shiftKey) {
+                e.preventDefault(); this._execute('showColors');
+            }
         });
     }
 
@@ -520,6 +526,8 @@ export class MenuSystem {
                     renderer.render();
                 }
                 return;
+
+            case 'showColors': this.onShowColors?.(); return;
         }
     }
 

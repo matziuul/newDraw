@@ -21,32 +21,37 @@ function serializeShape(shape) {
             return { ...base,
                 x: shape.x, y: shape.y, width: shape.width, height: shape.height,
                 fillIdx: shape.fillIdx, strokeWidth: shape.strokeWidth,
-                strokeDash: shape.strokeDash, strokePatternIdx: shape.strokePatternIdx };
+                strokeDash: shape.strokeDash, strokePatternIdx: shape.strokePatternIdx,
+                fillColor: shape.fillColor ?? null, strokeColor: shape.strokeColor ?? null };
         case 'roundrect':
             return { ...base,
                 x: shape.x, y: shape.y, width: shape.width, height: shape.height,
                 cornerRadius: shape.cornerRadius,
                 fillIdx: shape.fillIdx, strokeWidth: shape.strokeWidth,
-                strokeDash: shape.strokeDash, strokePatternIdx: shape.strokePatternIdx };
+                strokeDash: shape.strokeDash, strokePatternIdx: shape.strokePatternIdx,
+                fillColor: shape.fillColor ?? null, strokeColor: shape.strokeColor ?? null };
         case 'line':
             return { ...base,
                 x1: shape.x1, y1: shape.y1, x2: shape.x2, y2: shape.y2,
                 fillIdx: shape.fillIdx, strokeWidth: shape.strokeWidth,
                 strokeDash: shape.strokeDash, strokePatternIdx: shape.strokePatternIdx,
-                arrowMode: shape.arrowMode };
+                arrowMode: shape.arrowMode,
+                fillColor: shape.fillColor ?? null, strokeColor: shape.strokeColor ?? null };
         case 'bezier':
             return { ...base,
                 points: shape.points.map(p => ({ ...p })),
                 fillIdx: shape.fillIdx, strokeWidth: shape.strokeWidth,
                 strokeDash: shape.strokeDash, strokePatternIdx: shape.strokePatternIdx,
-                arrowMode: shape.arrowMode };
+                arrowMode: shape.arrowMode,
+                fillColor: shape.fillColor ?? null, strokeColor: shape.strokeColor ?? null };
         case 'arc':
             return { ...base,
                 x: shape.x, y: shape.y, width: shape.width, height: shape.height,
                 quadrant: shape.quadrant,
                 startAngleDeg: shape.startAngleDeg, arcAngleDeg: shape.arcAngleDeg,
                 fillIdx: shape.fillIdx, strokeWidth: shape.strokeWidth,
-                strokeDash: shape.strokeDash, strokePatternIdx: shape.strokePatternIdx };
+                strokeDash: shape.strokeDash, strokePatternIdx: shape.strokePatternIdx,
+                fillColor: shape.fillColor ?? null, strokeColor: shape.strokeColor ?? null };
         case 'group':
             return { ...base, children: shape.children.map(serializeShape) };
         case 'text':
@@ -117,6 +122,8 @@ function deserializeShape(data) {
         if (data.type !== 'text') {
             shape.strokeDash = data.strokeDash ?? 0;
             shape.strokePatternIdx = data.strokePatternIdx ?? 3;
+            if (data.fillColor)   shape.fillColor   = data.fillColor;
+            if (data.strokeColor) shape.strokeColor = data.strokeColor;
         }
     }
 

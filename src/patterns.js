@@ -44,22 +44,32 @@ export const QD_PATTERNS = [
 
 /**
  * Converts an 8-row QuickDraw bitmap pattern into a repeating Canvas 2D pattern.
- * Each row is a byte where bit 7 is the leftmost pixel: set = black, clear = white.
+ * Each row is a byte where bit 7 is the leftmost pixel: set = ink, clear = white.
+ * Pass an optional `color` hex string to use a non-black ink color.
  *
  * @param {CanvasRenderingContext2D} ctx - The rendering context that will own the pattern.
  * @param {number[]} rows - Array of 8 bytes describing the 8×8 tile.
+ * @param {string|null} [color] - Hex ink color (e.g. '#ff0000'). Defaults to black.
  * @returns {CanvasPattern} A tiling pattern ready to assign to ctx.fillStyle / ctx.strokeStyle.
  */
-export function buildPattern(ctx, rows) {
+export function buildPattern(ctx, rows, color) {
     const off = document.createElement('canvas');
     off.width = 8; off.height = 8;
     const oc = off.getContext('2d');
     const img = oc.createImageData(8, 8);
+    let ir = 0, ig = 0, ib = 0;
+    if (color && color.length === 7 && color[0] === '#') {
+        ir = parseInt(color.slice(1, 3), 16);
+        ig = parseInt(color.slice(3, 5), 16);
+        ib = parseInt(color.slice(5, 7), 16);
+    }
     for (let y = 0; y < 8; y++) {
         for (let x = 0; x < 8; x++) {
             const on = rows[y] & (1 << (7 - x));
             const i = (y * 8 + x) * 4;
-            img.data[i] = img.data[i+1] = img.data[i+2] = on ? 0 : 255;
+            img.data[i]   = on ? ir : 255;
+            img.data[i+1] = on ? ig : 255;
+            img.data[i+2] = on ? ib : 255;
             img.data[i+3] = 255;
         }
     }

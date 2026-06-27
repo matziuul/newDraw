@@ -10,6 +10,7 @@ import { importMacFile } from './import.js';
 import { Inspector } from './inspector.js';
 import { saveDocument, loadDocument } from './document.js';
 import { DebugPanel } from './debug-panel.js';
+import { ColorPicker } from './color-picker.js';
 
 const canvas   = document.getElementById('drawingCanvas');
 const state    = new AppState();
@@ -28,6 +29,24 @@ const toolController = new ToolController(state, renderer, history, ruler, canva
 toolController.inspector = inspector;
 new GridControls(state, renderer, ruler);
 const debugPanel = new DebugPanel(state, renderer);
+
+// Color picker
+const colorPicker = new ColorPicker();
+toolController.colorPicker = colorPicker;
+
+let _cpSnap = null;
+colorPicker.onDragStart = () => { _cpSnap = history.savePreOp(); };
+colorPicker.onDragEnd   = () => { if (_cpSnap) { history.commit(_cpSnap); _cpSnap = null; } };
+colorPicker.onChange = (target, color) => {
+    if (target === 'fill') state.activeFillColor = color;
+    else state.activeStrokeColor = color;
+    const sel = state.selectedShape;
+    if (sel && sel.type !== 'group' && sel.type !== 'text') {
+        if (target === 'fill') sel.fillColor = color;
+        else sel.strokeColor = color;
+        renderer.render();
+    }
+};
 
 // Sync debug panel highlight after every render
 const _origRender = renderer.render.bind(renderer);
@@ -236,7 +255,8 @@ const saveDoc = () => saveDocument(state.shapes, canvas.width, canvas.height);
 
 // ── Menu system ───────────────────────────────────────────────────────────────
 
-new MenuSystem({ state, history, renderer, canvas, importInput, docInput, saveDoc, toolController, onCanvasSize: openCanvasSizeDialog });
+const menuSystem = new MenuSystem({ state, history, renderer, canvas, importInput, docInput, saveDoc, toolController, onCanvasSize: openCanvasSizeDialog });
+menuSystem.onShowColors = () => colorPicker.toggle();
 
 // ── Ruler origin drag (click-and-drag on the corner square) ───────────────────
 

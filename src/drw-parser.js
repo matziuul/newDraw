@@ -75,23 +75,32 @@ function rdpSimplify(pts, eps) {
  *   Array of knot objects, each carrying the anchor and its two cubic control points.
  */
 function catmullRomBezier(pts) {
-    const n = pts.length;
-    const result = [];
-    for (let i = 0; i < n; i++) {
-        const p = pts[i];
-        let tx, ty;
-        if (i === 0)       { tx = pts[1].x - p.x;         ty = pts[1].y - p.y; }
-        else if (i === n-1){ tx = p.x - pts[n-2].x;       ty = p.y - pts[n-2].y; }
-        else               { tx = (pts[i+1].x - pts[i-1].x) / 2; ty = (pts[i+1].y - pts[i-1].y) / 2; }
-        result.push({
-            x:   p.x,             y:   p.y,
-            c1x: i === 0   ? p.x : p.x - tx / 3,
-            c1y: i === 0   ? p.y : p.y - ty / 3,
-            c2x: i === n-1 ? p.x : p.x + tx / 3,
-            c2y: i === n-1 ? p.y : p.y + ty / 3,
-        });
-    }
-    return result;
+    const last = pts.length - 1;
+    return pts.map((knot, i) => {
+        const prev = pts[i - 1];
+        const next = pts[i + 1];
+
+        // Catmull-Rom tangent at this knot: chord from the previous point to
+        // the next point, scaled to half-length. At the endpoints we use a
+        // one-sided chord (start→next or prev→end) so the curve doesn't overshoot.
+        let tangentX, tangentY;
+        if      (i === 0)    { tangentX = next.x - knot.x;          tangentY = next.y - knot.y; }
+        else if (i === last) { tangentX = knot.x - prev.x;          tangentY = knot.y - prev.y; }
+        else                 { tangentX = (next.x - prev.x) / 2;    tangentY = (next.y - prev.y) / 2; }
+
+        // The cubic Bézier control points sit one-third of the tangent away from
+        // the knot on each side. The in-handle (c1) pulls back along the tangent;
+        // the out-handle (c2) pushes forward. At the first knot c1 collapses to
+        // the knot itself (no incoming segment), and at the last knot c2 does the same.
+        return {
+            x:   knot.x,
+            y:   knot.y,
+            c1x: i === 0    ? knot.x : knot.x - tangentX / 3,
+            c1y: i === 0    ? knot.y : knot.y - tangentY / 3,
+            c2x: i === last ? knot.x : knot.x + tangentX / 3,
+            c2y: i === last ? knot.y : knot.y + tangentY / 3,
+        };
+    });
 }
 
 /**
@@ -134,6 +143,32 @@ function parseFreehandStroke(view, bytes, o, scale) {
     s.strokePatternIdx = bytes[o + 1];
     s.fillIdx          = 0;
     return s;
+}
+
+// ─── Record size helper ───────────────────────────────────────────────────────
+
+// Returns the total byte size of a record starting at pos (prefix included).
+// Record layout: [typeCode, 0x00, {0|1}, 0x00] prefix + 4-byte header + data.
+// Sizes: 0x02–0x06 = 24, 0x07 = 28, 0x08 = variable (00 00 terminator), 0x09 = 32+nPts*8.
+// Returns 0 for text (0x01), unknown types, or out-of-bounds.
+function recordSize(bytes, pos) {
+    const tc = bytes[pos];
+    const hp = pos + 4;
+    if (tc === 0x08) {
+        let e = hp + 36;
+        while (e + 1 < bytes.length && !(bytes[e] === 0 && bytes[e + 1] === 0)) e += 2;
+        return (e + 2) - pos;
+    }
+    if (tc === 0x09) {
+        if (hp + 10 > bytes.length) return 0;
+        const nPts = (bytes[hp + 8] << 8) | bytes[hp + 9];
+        if (nPts < 1 || nPts > 500) return 0;
+        const sz = 32 + nPts * 8;
+        return pos + sz <= bytes.length ? sz : 0;
+    }
+    if (tc === 0x07) return hp + 24 <= bytes.length ? 28 : 0;
+    if (tc >= 0x02 && tc <= 0x06) return hp + 20 <= bytes.length ? 24 : 0;
+    return 0;
 }
 
 // ─── Text extraction ──────────────────────────────────────────────────────────
@@ -503,24 +538,15 @@ function parseMacDrawRecord(view, bytes, o, type, flags, scale, pageOffPtX = 0, 
 // ─── Main DRW parser ──────────────────────────────────────────────────────────
 
 /**
- * Top-level parser for a MacDraw II .drw file. Converts the binary drawing data
- * into an array of shape objects ready for rendering.
+ * Top-level parser for a MacDraw II .drw file.
  *
- * Processing steps:
- *  1. Locate the start of the drawing-object stream via findMacDrawObjects.
- *  2. Heuristically scan for candidate record offsets (minimum 24-byte spacing).
- *  3. Compute raw bounding boxes (16.16 fixed-point) for every candidate record.
- *  4. Detect bbox-containment group relationships and build GroupShape trees.
- *  5. Handle typed group containers (shape type 0x0a) as a separate inline pass.
- *  6. Parse all remaining unclaimed records as individual shapes.
- *  7. Append text shapes extracted by parseMacDrawText.
+ * Every record (group or shape) starts with a 4-byte prefix [typeCode, 0x00, {0|1}, 0x00]
+ * followed by a 4-byte header [pen, stroke, fill, class] and shape data.
+ * The parser scans sequentially, dispatching on typeCode and advancing by the known record size.
+ * Group records (0x0a) contain nChildren child records starting at header+36; their inter-record
+ * footer bytes are skipped naturally because they don't match the prefix pattern.
  *
- * Coordinates are converted from 72 dpi points to 96 dpi screen pixels (scale = 96/72).
- *
- * @param {ArrayBuffer} buffer - The raw file contents as an ArrayBuffer (needed for DataView).
- * @param {Uint8Array} bytes - The same data as a Uint8Array for direct byte access.
- * @returns {Array<RectangleShape|RoundRectShape|EllipseShape|LineShape|ArcShape|BezierShape|TextShape|GroupShape>}
- *   Flat array of all parsed shapes; groups contain their children recursively.
+ * Coordinates are 16.16 fixed-point at 72 dpi; output is in 96 dpi screen pixels (scale = 96/72).
  */
 export function parseMacDraw(buffer, bytes) {
     const view = new DataView(buffer);
@@ -530,197 +556,57 @@ export function parseMacDraw(buffer, bytes) {
     const startOffset = findMacDrawObjects(bytes);
     if (startOffset < 0) throw new Error('MacDraw II: could not locate drawing objects in file.');
 
-    const recs = [];
-    if (startOffset >= 0 &&
-        bytes[startOffset] >= 0x02 &&
-        bytes[startOffset + 1] !== 0x03 &&
-        bytes[startOffset + 2] < 0x20) {
-        recs.push(startOffset);
-    }
-    for (let i = startOffset; i < bytes.length - 3; i++) {
-        if (bytes[i] >= 0x01 && bytes[i+1] >= 0x01 && bytes[i+2] < 0x20) {
-            if (recs.length === 0 || i - recs[recs.length - 1] >= 24) recs.push(i);
+    // ── Single sequential scan ────────────────────────────────────────────────
+    // Prefix pattern: [typeCode, 0x00, {0|1}, 0x00]. typeCode 0x0a = group.
+    let pos = startOffset - 4; // step back to include the prefix of the first record
+    while (pos < bytes.length - 4) {
+        const tc = bytes[pos];
+        if (tc < 0x02 || tc > 0x0a ||
+            bytes[pos + 1] !== 0x00 || bytes[pos + 2] > 0x01 || bytes[pos + 3] !== 0x00) {
+            pos++; continue;
         }
-    }
-    dbg('MDraw recs found:', recs.length, 'at offsets', recs.slice(0, 10).map(r => '0x'+r.toString(16)));
-    for (let _ri = 0; _ri < Math.min(recs.length, 5); _ri++) {
-        const _o = recs[_ri];
-        const _len = _ri + 1 < recs.length ? recs[_ri+1] - _o : bytes.length - _o;
-        const _d = Array.from({length: Math.min(48, _len)}, (_, k) => bytes[_o+k].toString(16).padStart(2,'0')).join(' ');
-        dbg(`  rec[${_ri}] 0x${_o.toString(16)} len=${_len}: ${_d}`);
-    }
-    recs.push(bytes.length);
 
-    // First pass: collect raw Fixed16.16 bboxes for all candidate records
-    const rawBoxes = [];
-    for (let ri = 0; ri < recs.length - 1; ri++) {
-        const o = recs[ri];
-        if (recs[ri+1] - o < 20 || o + 20 > bytes.length) { rawBoxes.push(null); continue; }
-        const _t = readFixed(view, o + 4), _l = readFixed(view, o + 8);
-        const _f3 = readFixed(view, o + 12), _f4 = readFixed(view, o + 16);
-        const _recLen = recs[ri+1] - o;
-        const _isLine = bytes[o+2]===0x02 && bytes[o+1]!==0x05;
-        const _isArc = (bytes[o+2]===0x01 || (bytes[o+2]===0x02 && bytes[o+1]===0x05)) && _recLen >= 28;
-        if (_isLine) {
-            rawBoxes.push({ top: Math.min(_t, _f3), left: Math.min(_l, _f4),
-                            bot: Math.max(_t, _f3), rgt: Math.max(_l, _f4) });
-        } else if (_isArc) {
-            rawBoxes.push({ top: _t, left: _l, bot: _f3, rgt: _f4 });
-        } else {
-            rawBoxes.push({ top: _t, left: _l, bot: _f3, rgt: _f4 });
-        }
-    }
+        const hp = pos + 4;
+        if (hp + 20 > bytes.length) break;
 
-    const pageOffPtX = 0;
-    const pageOffPtY = 0;
+        if (tc === 0x0a) {
+            // ── Group ─────────────────────────────────────────────────────────
+            if (bytes[hp + 1] !== 0x03 || bytes[hp + 2] >= 0x20) { pos++; continue; }
+            const gtop  = readFixed(view, hp + 4);
+            const gleft = readFixed(view, hp + 8);
+            if (gtop < -100 || gtop > 10000 || gleft < -100 || gleft > 10000) { pos++; continue; }
+            const nChildren = (bytes[hp + 20] << 8) | bytes[hp + 21];
+            if (nChildren === 0 || nChildren > 200) { pos++; continue; }
 
-    const GROUP_TYPES = new Set([0x04, 0x11]);
-    const groupContainerIdxs = new Set();
-    for (let i = 0; i < rawBoxes.length; i++) {
-        const a = rawBoxes[i];
-        if (!a) continue;
-        if (!GROUP_TYPES.has(bytes[recs[i] + 2])) continue;
-        let uTop = Infinity, uLeft = Infinity, uBot = -Infinity, uRgt = -Infinity, n = 0;
-        for (let j = 0; j < rawBoxes.length; j++) {
-            if (i === j) continue;
-            const b = rawBoxes[j];
-            if (!b) continue;
-            if (b.top >= a.top && b.left >= a.left && b.bot <= a.bot && b.rgt <= a.rgt) {
-                uTop = Math.min(uTop, b.top); uLeft = Math.min(uLeft, b.left);
-                uBot = Math.max(uBot, b.bot); uRgt = Math.max(uRgt, b.rgt);
-                n++;
+            const childShapes = [];
+            let cPos = hp + 36; // children immediately follow the 36-byte group header
+            for (let ci = 0; ci < nChildren; ci++) {
+                const sz = recordSize(bytes, cPos);
+                if (sz === 0) break;
+                const chp = cPos + 4;
+                const s = bytes[cPos] === 0x08
+                    ? parseFreehandStroke(view, bytes, chp, scale)
+                    : parseMacDrawRecord(view, bytes, chp, bytes[chp + 2], bytes[chp + 3], scale, 0, 0, sz);
+                if (s) childShapes.push(s);
+                cPos += sz;
             }
-        }
-        const tol = 1.0;
-        if (n >= 2 &&
-            Math.abs(uTop - a.top) < tol && Math.abs(uLeft - a.left) < tol &&
-            Math.abs(uBot - a.bot) < tol && Math.abs(uRgt - a.rgt) < tol) {
-            groupContainerIdxs.add(i);
-        }
-    }
 
-    const groupChildMap = new Map();
-    const claimed = new Set();
-    const sortedGroups = [...groupContainerIdxs].sort((a, b) => {
-        const ba = rawBoxes[a], bb = rawBoxes[b];
-        return (ba.rgt - ba.left) * (ba.bot - ba.top) - (bb.rgt - bb.left) * (bb.bot - bb.top);
-    });
-    for (const gi of sortedGroups) {
-        const a = rawBoxes[gi];
-        const children = [];
-        for (let j = 0; j < rawBoxes.length; j++) {
-            if (j === gi || claimed.has(j)) continue;
-            const b = rawBoxes[j];
-            if (!b) continue;
-            if (b.top >= a.top && b.left >= a.left && b.bot <= a.bot && b.rgt <= a.rgt)
-                children.push(j);
-        }
-        groupChildMap.set(gi, children);
-        for (const ci of children) claimed.add(ci);
-    }
-
-    /**
-     * Recursively builds a GroupShape from a group container record.
-     * Children that are themselves group containers are built first (depth-first),
-     * then leaf records are parsed with parseMacDrawRecord. Empty groups are dropped.
-     *
-     * @param {number} gi - Index into `recs` identifying the group container record.
-     * @returns {GroupShape|null} The assembled group, or null if it produced no valid children.
-     */
-    const buildGroup = (gi) => {
-        const childShapes = [];
-        for (const ci of groupChildMap.get(gi) || []) {
-            const co = recs[ci];
-            let s;
-            if (groupContainerIdxs.has(ci)) {
-                s = buildGroup(ci);
-            } else {
-                s = parseMacDrawRecord(view, bytes, co, bytes[co+2], bytes[co+3], scale, pageOffPtX, pageOffPtY, recs[ci+1] - co);
-            }
-            if (s) childShapes.push(s);
-        }
-        return childShapes.length > 0 ? new GroupShape(childShapes) : null;
-    };
-
-    // ── Typed group containers (shapeTypeCode = 0x0a) ─────────────────────────
-    const typedGroupHandled = new Set();
-
-    for (let pos = startOffset - 4; pos + 40 < bytes.length; pos++) {
-        if (bytes[pos] !== 0x0a) continue;
-        const o = pos + 4;
-        if (o + 36 > bytes.length) continue;
-        if (bytes[o] < 0x02 || bytes[o + 1] !== 0x03 || bytes[o + 2] >= 0x20) continue;
-
-        const childCount = (bytes[o + 20] << 8) | bytes[o + 21];
-        if (childCount === 0 || childCount > 200) continue;
-
-        const childStart = o + 36;
-        const groupByteEnd = childStart + childCount * 24;
-        if (groupByteEnd > bytes.length) continue;
-
-        let allValid = true;
-        for (let ci = 0; ci < childCount; ci++) {
-            const hp0 = childStart + ci * 24 + 4;
-            if (hp0 + 4 > bytes.length ||
-                bytes[hp0] < 0x02 || bytes[hp0 + 1] < 0x01 || bytes[hp0 + 2] >= 0x20 ||
-                bytes[hp0] > 0x0a) { allValid = false; break; }
-        }
-        if (!allValid) continue;
-
-        const childShapes = [];
-        for (let ci = 0; ci < childCount; ci++) {
-            const hp = childStart + ci * 24 + 4;
-            if (hp + 20 > bytes.length) break;
-            if (bytes[hp] < 0x02 || bytes[hp + 1] < 0x01 || bytes[hp + 2] >= 0x20) break;
-            const s = parseMacDrawRecord(view, bytes, hp, bytes[hp + 2], bytes[hp + 3],
-                                         scale, pageOffPtX, pageOffPtY, 20);
-            if (s) childShapes.push(s);
+            if (childShapes.length > 0) shapes.push(new GroupShape(childShapes));
+            pos = cPos; // footer bytes between groups don't match the prefix → skipped naturally
+            continue;
         }
 
-        if (childShapes.length > 0) {
-            const g = new GroupShape(childShapes);
-            g.debugSource = { format: 'DRW', offset: o, typeCode: 0x0a };
-            shapes.push(g);
-            typedGroupHandled.add(o);
-        }
+        // ── Standalone shape ──────────────────────────────────────────────────
+        if (bytes[hp] < 0x01 || bytes[hp] >= 0x20 || bytes[hp + 2] >= 0x20) { pos++; continue; }
 
-        const claimEnd = groupByteEnd + 8;
-        for (let j = 0; j < recs.length - 1; j++) {
-            if (recs[j] >= pos && recs[j] < claimEnd) claimed.add(j);
-        }
+        const sz = recordSize(bytes, pos);
+        if (sz === 0) { pos++; continue; }
 
-        pos = groupByteEnd + 7;
-    }
-
-    for (let ri = 0; ri < recs.length - 1; ri++) {
-        const o = recs[ri];
-        if (recs[ri+1] - o < 20 || claimed.has(ri)) continue;
-        if (typedGroupHandled.has(o)) continue;
-        const shapeTypePre = o >= 4 ? bytes[o - 4] : 0;
-        let shape;
-        if (groupContainerIdxs.has(ri)) {
-            const gcAttr = Array.from({length: 28}, (_, k) => (bytes[o + 20 + k] ?? 0).toString(16).padStart(2, '0')).join(' ');
-            dbg(`MDraw GROUP type=0x${bytes[o+2].toString(16).padStart(2,'0')} flags=0x${bytes[o+3].toString(16).padStart(2,'0')} len=${recs[ri+1]-o}  attr[+20..+47]: ${gcAttr}`);
-            shape = buildGroup(ri);
-        } else if (shapeTypePre === 0x08) {
-            shape = parseFreehandStroke(view, bytes, o, scale);
-            if (shape) {
-                let deltaEnd = o + 36;
-                while (deltaEnd + 1 < bytes.length) {
-                    if (bytes[deltaEnd] === 0 && bytes[deltaEnd + 1] === 0) break;
-                    deltaEnd += 2;
-                }
-                for (let j = ri + 1; j < recs.length - 1; j++) {
-                    if (recs[j] <= deltaEnd) claimed.add(j); else break;
-                }
-            }
-        } else {
-            shape = parseMacDrawRecord(view, bytes, o, bytes[o+2], bytes[o+3], scale, pageOffPtX, pageOffPtY, recs[ri+1] - o);
-        }
-        if (shape) {
-            shape.debugSource = { format: 'DRW', offset: o, typeCode: bytes[o+2] };
-            shapes.push(shape);
-        }
+        const shape = tc === 0x08
+            ? parseFreehandStroke(view, bytes, hp, scale)
+            : parseMacDrawRecord(view, bytes, hp, bytes[hp + 2], bytes[hp + 3], scale, 0, 0, sz);
+        if (shape) shapes.push(shape);
+        pos += sz;
     }
 
     for (const t of parseMacDrawText(view, bytes, scale)) shapes.push(t);

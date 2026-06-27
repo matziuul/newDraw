@@ -63,10 +63,11 @@ describe('testfiles', () => {
         expect(shapes[0].strokeWidth).toBe(1);
     });
 
-    // freehand paths use spline/bezier data in DRWG — not yet supported
+    // freehand strokes are approximated as a single BezierShape via Catmull-Rom fitting
     it('freehand.drw', () => {
         const { shapes } = importMacFile(load('freehand.drw'));
-        expect(shapes).toHaveLength(0);
+        expect(shapes).toHaveLength(1);
+        expect(shapes[0].type).toBe('bezier');
     });
 
     // PICT polygon opcode → single BezierShape

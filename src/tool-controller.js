@@ -130,6 +130,8 @@ export class ToolController {
                 this.state.activeStrokeWidth      = sel.strokeWidth;
                 this.state.activeStrokeDash       = sel.strokeDash ?? 0;
                 this.state.activeStrokePatternIdx = sel.strokePatternIdx ?? 3;
+                this.state.activeFillColor        = sel.fillColor ?? null;
+                this.state.activeStrokeColor      = sel.strokeColor ?? null;
                 if (sel.type === 'line' || sel.type === 'bezier')
                     this.state.activeArrowMode = sel.arrowMode ?? 0;
                 if (sel.type === 'rectangle') {
@@ -159,6 +161,10 @@ export class ToolController {
         }
         this.toolbar?.sync();
         this.inspector?.sync();
+        if (this.colorPicker) {
+            const cs = sel && sel.type !== 'group' && sel.type !== 'text' ? sel : null;
+            this.colorPicker.setColors(cs?.fillColor ?? null, cs?.strokeColor ?? null);
+        }
         this.renderer.render();
     }
 
@@ -833,6 +839,8 @@ export class ToolController {
                     shape.strokeWidth      = this.state.activeStrokeWidth;
                     shape.strokeDash       = this.state.activeStrokeDash;
                     shape.strokePatternIdx = this.state.activeStrokePatternIdx;
+                    shape.fillColor        = this.state.activeFillColor ?? null;
+                    shape.strokeColor      = this.state.activeStrokeColor ?? null;
                     if (shape.type === 'line') shape.arrowMode = this.state.activeArrowMode;
                     this.state.shapes.push(shape);
                     this.state.selectedId = shape.id;
@@ -925,6 +933,8 @@ export class ToolController {
             shape.strokeDash       = this.state.activeStrokeDash;
             shape.strokePatternIdx = this.state.activeStrokePatternIdx;
             shape.arrowMode        = this.state.activeArrowMode;
+            shape.fillColor        = this.state.activeFillColor ?? null;
+            shape.strokeColor      = this.state.activeStrokeColor ?? null;
             this.state.shapes.push(shape);
             this.state.selectedId = shape.id;
             this.history.commit(this.preOpSnapshot);
