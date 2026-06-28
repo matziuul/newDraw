@@ -1,7 +1,7 @@
 import { RectangleShape, EllipseShape, LineShape, TextShape, RoundRectShape, ArcShape, GroupShape, BezierShape } from './shapes.js';
 
 const DEBUG = true;
-const dbg = (...a) => DEBUG && console.log(...a);
+const dbg = (...a) => DEBUG && console.log(...a); // eslint-disable-line no-console
 
 const SHAPE_TYPE_NAMES = {
     0x02: 'line', 0x03: 'line-rev', 0x04: 'rect', 0x05: 'roundrect',
@@ -236,7 +236,7 @@ function parseMacDrawText(view, bytes, scale) {
             if (pass === 0 && isWrapper) continue;
             if (pass === 1 && !isWrapper) continue;
 
-            let textOff = -1, x = 0, y = 0;
+            let textOff, x, y;
 
             if (type === 0x01 && flags === 0x01) {
                 if (i + 12 > bytes.length) continue;

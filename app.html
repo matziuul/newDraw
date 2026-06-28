@@ -16,7 +16,7 @@
 
         #app {
             display: grid;
-            grid-template-columns: 84px 1fr 150px;
+            grid-template-columns: 84px 1fr 220px;
             grid-template-rows: 42px auto 1fr 28px;
             height: 100vh;
         }
@@ -559,50 +559,8 @@
         }
         #canvasSizeDialog button.primary { background: black; color: white; }
 
-        /* ── Color Picker palette ── */
-        .mac-palette {
-            position: fixed;
-            top: 100px;
-            right: 164px;
-            z-index: 900;
-            background: white;
-            border: 1px solid black;
-            box-shadow: 2px 2px 0 rgba(0,0,0,0.35);
-            font-family: Geneva, Chicago, Arial, sans-serif;
-            font-size: 11px;
-            user-select: none;
-        }
-        .mac-palette-title {
-            background: repeating-linear-gradient(to bottom, #888 0, #888 1px, #e0e0e0 1px, #e0e0e0 2px);
-            padding: 3px 8px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-            min-height: 22px;
-        }
-        .mac-palette-label {
-            background: #e0e0e0;
-            padding: 0 6px;
-            font-size: 11px;
-            font-weight: bold;
-        }
-        .mac-palette-close {
-            position: absolute;
-            right: 4px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: #e0e0e0;
-            border: 1px solid #888;
-            cursor: pointer;
-            font-size: 9px;
-            padding: 0 3px;
-            line-height: 1.5;
-            color: #333;
-        }
-        .mac-palette-close:hover { background: #ccc; }
-        .mac-palette-body { padding: 8px; }
-        .cp-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+        .cp-divider { border: none; border-top: 1px solid #aaa; margin: 6px -8px 4px; }
+        .cp-tabs { display: flex; gap: 4px; margin-bottom: 6px; }
         .cp-tab {
             flex: 1;
             display: flex;
@@ -616,7 +574,7 @@
         }
         .cp-tab-active { border-color: #000; }
         .cp-swatch { width: 28px; height: 28px; border: 1px solid #888; margin-bottom: 3px; }
-        #_cpCanvas { display: block; cursor: crosshair; }
+        #_cpCanvas { display: block; width: 100%; aspect-ratio: 1; cursor: crosshair; }
         .cp-bottom { display: flex; align-items: center; gap: 5px; margin-top: 7px; }
         .cp-none-btn {
             font: 11px Geneva, Chicago, Arial, sans-serif;
@@ -713,6 +671,24 @@
             <input class="insp-input" id="inspArc" type="number" min="1" max="360" step="1">
         </div>
         <div class="insp-unit" id="inspUnit">px</div>
+        <hr class="cp-divider">
+        <div class="insp-title">Color</div>
+        <div class="cp-tabs">
+            <div class="cp-tab cp-tab-active" id="_cpTabFill">
+                <div class="cp-swatch" id="_cpFillSwatch"></div>
+                <span>Fill</span>
+            </div>
+            <div class="cp-tab" id="_cpTabStroke">
+                <div class="cp-swatch" id="_cpStrokeSwatch"></div>
+                <span>Border</span>
+            </div>
+        </div>
+        <canvas id="_cpCanvas" width="200" height="200"></canvas>
+        <div class="cp-bottom">
+            <button class="cp-none-btn" id="_cpNone">None</button>
+            <input type="text" id="_cpHex" class="cp-hex" maxlength="7" placeholder="#rrggbb">
+            <div class="cp-preview" id="_cpPreview"></div>
+        </div>
     </aside>
 
     <footer class="status-bar">

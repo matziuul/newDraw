@@ -255,8 +255,7 @@ const saveDoc = () => saveDocument(state.shapes, canvas.width, canvas.height);
 
 // ── Menu system ───────────────────────────────────────────────────────────────
 
-const menuSystem = new MenuSystem({ state, history, renderer, canvas, importInput, docInput, saveDoc, toolController, onCanvasSize: openCanvasSizeDialog });
-menuSystem.onShowColors = () => colorPicker.toggle();
+new MenuSystem({ state, history, renderer, canvas, importInput, docInput, saveDoc, toolController, onCanvasSize: openCanvasSizeDialog });
 
 // ── Ruler origin drag (click-and-drag on the corner square) ───────────────────
 
